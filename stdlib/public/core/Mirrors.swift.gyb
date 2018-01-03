@@ -1,12 +1,12 @@
-//===--- Mirrors.swift.gyb - Common _MirrorType impls. --------*- swift -*-===//
+//===--- Mirrors.swift.gyb - Common _Mirror implementations ---*- swift -*-===//
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -18,38 +18,36 @@ from SwiftIntTypes import all_integer_types
 word_bits = int(CMAKE_SIZEOF_VOID_P) * 8
 
 Types = [
-    ('Float', '.Float', 'self'),
-    ('Double', '.Double', 'self'),
-    ('Bool', '.Logical', 'self'),
-    ('String', '.Text', 'self'),
-    ('Character', '.Text', 'String(self)'),
-    ('UnicodeScalar', '.UInt', 'UInt64(self)'),
+    ('Float', '.float', 'self'),
+    ('Double', '.double', 'self'),
+    ('Bool', '.bool', 'self'),
+    ('String', '.text', 'self'),
+    ('Character', '.text', 'String(self)'),
+    ('Unicode.Scalar', '.uInt', 'UInt64(self)'),
 ]
 
 for self_ty in all_integer_types(word_bits):
   Self = self_ty.stdlib_name
   if self_ty.is_signed:
-    Types.append( (Self, '.Int', 'Int64(self)') )
+    Types.append( (Self, '.int', 'Int64(self)') )
   else:
-    Types.append( (Self, '.UInt', 'UInt64(self)') )
+    Types.append( (Self, '.uInt', 'UInt64(self)') )
 
 }%
-
-internal func _toString<T>(x: T) -> String {
-  return String(x)
-}
 
 %for Type in Types:
 
 extension ${Type[0]} : CustomReflectable {
-  /// Returns a mirror that reflects `self`.
-  public func customMirror() -> Mirror {
-    return Mirror(self, unlabeledChildren: [Any]())
+  /// A mirror that reflects the `${Type[0]}` instance.
+  @_inlineable // FIXME(sil-serialize-all)
+  public var customMirror: Mirror {
+    return Mirror(self, unlabeledChildren: EmptyCollection<Void>())
   }
 }
 
 extension ${Type[0]} : CustomPlaygroundQuickLookable {
-  public func customPlaygroundQuickLook() -> PlaygroundQuickLook {
+  @_inlineable // FIXME(sil-serialize-all)
+  public var customPlaygroundQuickLook: PlaygroundQuickLook {
     return ${Type[1]}(${Type[2]})
   }
 }

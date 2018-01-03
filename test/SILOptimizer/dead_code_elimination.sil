@@ -1,4 +1,4 @@
-// RUN: %target-sil-opt -enable-sil-verify-all -dce %s | FileCheck %s
+// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -dce %s | %FileCheck %s
 
 sil_stage canonical
 
@@ -61,11 +61,15 @@ bb3:
 // loops.
 // CHECK-LABEL: sil @dead3
 sil @dead3 : $@convention(thin) () -> () {
-// CHECK: bb0
 bb0:
+// CHECK: bb0
+  br bb1
+// CHECK: bb1
+bb1:
 // CHECK: integer_literal $Builtin.Int32, 0
+// CHECK: br bb1
   %0 = integer_literal $Builtin.Int32, 0
-  br bb0
+  br bb1
 }
 
 // CHECK-LABEL: sil hidden @test_dce_bbargs
@@ -185,7 +189,7 @@ bb9:
 // CHECK: bb10:
 bb10:
   %90 = tuple ()
-// CHECK: return 
+// CHECK: return
   return %90 : $()
 }
 

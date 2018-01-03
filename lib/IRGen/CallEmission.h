@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,6 +17,7 @@
 #ifndef SWIFT_IRGEN_CALLEMISSION_H
 #define SWIFT_IRGEN_CALLEMISSION_H
 
+#include "Address.h"
 #include "Callee.h"
 
 namespace llvm {
@@ -26,6 +27,8 @@ namespace llvm {
 namespace swift {
 namespace irgen {
 
+class Explosion;
+class LoadableTypeInfo;
 struct WitnessMetadata;
 
 /// A plan for emitting a series of calls.
@@ -33,12 +36,17 @@ class CallEmission {
 public:
   IRGenFunction &IGF;
 
+  struct TypedTemporary {
+    StackAddress Temp;
+    SILType Type;
+  };
+
 private:
-  /// The function attributes for the call.
-  llvm::AttributeSet Attrs;
-  
   /// The builtin/special arguments to pass to the call.
   SmallVector<llvm::Value*, 8> Args;
+
+  /// Temporaries required by the call.
+  SmallVector<TypedTemporary, 4> Temporaries;
 
   /// The function we're going to call.
   Callee CurCallee;
@@ -54,14 +62,11 @@ private:
   void setFromCallee();
   void emitToUnmappedMemory(Address addr);
   void emitToUnmappedExplosion(Explosion &out);
-  llvm::CallSite emitCallSite(bool hasIndirectResult);
-  llvm::CallSite emitInvoke(llvm::CallingConv::ID cc, llvm::Value *fn,
-                            ArrayRef<llvm::Value*> args,
-                            const llvm::AttributeSet &attrs);
+  llvm::CallSite emitCallSite();
 
 public:
-  CallEmission(IRGenFunction &IGF, const Callee &callee)
-      : IGF(IGF), CurCallee(callee) {
+  CallEmission(IRGenFunction &IGF, Callee &&callee)
+      : IGF(IGF), CurCallee(std::move(callee)) {
     setFromCallee();
   }
   CallEmission(const CallEmission &other) = delete;
@@ -69,24 +74,21 @@ public:
   CallEmission &operator=(const CallEmission &other) = delete;
   ~CallEmission();
 
-  Callee &getMutableCallee() { return CurCallee; }
   const Callee &getCallee() const { return CurCallee; }
 
-  ArrayRef<Substitution> getSubstitutions() const {
+  SubstitutionList getSubstitutions() const {
     return CurCallee.getSubstitutions();
   }
 
   /// Set the arguments to the function from an explosion.
-  void setArgs(Explosion &arg,
-               ArrayRef<SILParameterInfo> params,
+  void setArgs(Explosion &arg, bool isOutlined,
                WitnessMetadata *witnessMetadata = nullptr);
-  
+
   void addAttribute(unsigned Index, llvm::Attribute::AttrKind Attr);
 
-  void emitToMemory(Address addr, const TypeInfo &substResultTI);
-  void emitToExplosion(Explosion &out);
-   
-  void invalidate();
+  void emitToMemory(Address addr, const LoadableTypeInfo &substResultTI,
+                    bool isOutlined);
+  void emitToExplosion(Explosion &out, bool isOutlined);
 };
 
 

@@ -5,10 +5,10 @@ import resilient_struct
 // Fixed-layout, fixed-size base class
 
 @_fixed_layout
-public class OutsideParent {
-  public var property: String = "OutsideParent.property"
+open class OutsideParent {
+  open var property: String = "OutsideParent.property"
 
-  public class var classProperty: String {
+  open class var classProperty: String {
     return "OutsideParent.classProperty"
   }
 
@@ -16,11 +16,11 @@ public class OutsideParent {
     print("OutsideParent.init()")
   }
 
-  public func method() {
+  open func method() {
     print("OutsideParent.method()")
   }
 
-  public class func classMethod() {
+  open class func classMethod() {
     print("OutsideParent.classMethod()")
   }
 }
@@ -29,10 +29,12 @@ public class OutsideParent {
 // Fixed-layout, resiliently-sized base class
 
 @_fixed_layout
-public class OutsideParentWithResilientProperty {
+open class OutsideParentWithResilientProperty {
   public let p: Point
   public let s: Size
   public let color: Int32
+
+  public final lazy var laziestNumber = 0
 
   public init(p: Point, s: Size, color: Int32) {
     self.p = p
@@ -44,11 +46,11 @@ public class OutsideParentWithResilientProperty {
 
 // Resilient base class
 
-public class ResilientOutsideParent {
-  public var property: String = "ResilientOutsideParent.property"
+open class ResilientOutsideParent {
+  open var property: String = "ResilientOutsideParent.property"
   public final var finalProperty: String = "ResilientOutsideParent.finalProperty"
 
-  public class var classProperty: String {
+  open class var classProperty: String {
     return "ResilientOutsideParent.classProperty"
   }
 
@@ -56,11 +58,11 @@ public class ResilientOutsideParent {
     print("ResilientOutsideParent.init()")
   }
 
-  public func method() {
+  open func method() {
     print("ResilientOutsideParent.method()")
   }
 
-  public class func classMethod() {
+  open class func classMethod() {
     print("ResilientOutsideParent.classMethod()")
   }
 }
@@ -69,13 +71,13 @@ public class ResilientOutsideParent {
 // Fixed-layout, fixed-size subclass
 
 @_fixed_layout
-public class OutsideChild : OutsideParent {
-  public override func method() {
+open class OutsideChild : OutsideParent {
+  open override func method() {
     print("OutsideChild.method()")
     super.method()
   }
 
-  public override class func classMethod() {
+  open override class func classMethod() {
     print("OutsideChild.classMethod()")
     super.classMethod()
   }
@@ -84,13 +86,13 @@ public class OutsideChild : OutsideParent {
 
 // Resilient subclass
 
-public class ResilientOutsideChild : ResilientOutsideParent {
-  public override func method() {
+open class ResilientOutsideChild : ResilientOutsideParent {
+  open override func method() {
     print("ResilientOutsideChild.method()")
     super.method()
   }
 
-  public override class func classMethod() {
+  open override class func classMethod() {
     print("ResilientOutsideChild.classMethod()")
     super.classMethod()
   }
@@ -100,18 +102,18 @@ public class ResilientOutsideChild : ResilientOutsideParent {
 // Fixed-layout, dependently-sized, generic base class
 
 @_fixed_layout
-public class GenericOutsideParent<A> {
-  public var property: A
+open class GenericOutsideParent<A> {
+  open var property: A
   public init(property: A) {
     self.property = property
     print("GenericOutsideParent.init()")
   }
 
-  public func method() {
+  open func method() {
     print("GenericOutsideParent.method()")
   }
 
-  public class func classMethod() {
+  open class func classMethod() {
     print("GenericOutsideParent.classMethod()")
   }
 }
@@ -119,18 +121,18 @@ public class GenericOutsideParent<A> {
 
 // Resilient generic base class
 
-public class ResilientGenericOutsideParent<A> {
-  public var property: A
+open class ResilientGenericOutsideParent<A> {
+  open var property: A
   public init(property: A) {
     self.property = property
     print("ResilientGenericOutsideParent.init()")
   }
 
-  public func method() {
+  open func method() {
     print("ResilientGenericOutsideParent.method()")
   }
 
-  public class func classMethod() {
+  open class func classMethod() {
     print("ResilientGenericOutsideParent.classMethod()")
   }
 }
@@ -139,18 +141,18 @@ public class ResilientGenericOutsideParent<A> {
 // Fixed-layout, dependently-sized, generic subclass
 
 @_fixed_layout
-public class GenericOutsideChild<A> : GenericOutsideParent<A> {
+open class GenericOutsideChild<A> : GenericOutsideParent<A> {
   public override init(property: A) {
     print("GenericOutsideGenericChild.init(a: A)")
     super.init(property: property)
   }
 
-  public override func method() {
+  open override func method() {
     print("GenericOutsideChild.method()")
     super.method()
   }
 
-  public override class func classMethod() {
+  open override class func classMethod() {
     print("GenericOutsideChild.classMethod()")
     super.classMethod()
   }
@@ -159,18 +161,18 @@ public class GenericOutsideChild<A> : GenericOutsideParent<A> {
 
 // Resilient generic subclass
 
-public class ResilientGenericOutsideChild<A> : ResilientGenericOutsideParent<A> {
+open class ResilientGenericOutsideChild<A> : ResilientGenericOutsideParent<A> {
   public override init(property: A) {
     print("ResilientGenericOutsideGenericChild.init(a: A)")
     super.init(property: property)
   }
 
-  public override func method() {
+  open override func method() {
     print("ResilientGenericOutsideChild.method()")
     super.method()
   }
 
-  public override class func classMethod() {
+  open override class func classMethod() {
     print("ResilientGenericOutsideChild.classMethod()")
     super.classMethod()
   }
@@ -180,18 +182,18 @@ public class ResilientGenericOutsideChild<A> : ResilientGenericOutsideParent<A> 
 // Fixed-layout, fixed-size subclass of generic class
 
 @_fixed_layout
-public class ConcreteOutsideChild : GenericOutsideParent<String> {
+open class ConcreteOutsideChild : GenericOutsideParent<String> {
   public override init(property: String) {
     print("ConcreteOutsideChild.init(property: String)")
     super.init(property: property)
   }
 
-  public override func method() {
+  open override func method() {
     print("ConcreteOutsideChild.method()")
     super.method()
   }
 
-  public override class func classMethod() {
+  open override class func classMethod() {
     print("ConcreteOutsideChild.classMethod()")
     super.classMethod()
   }
@@ -200,18 +202,18 @@ public class ConcreteOutsideChild : GenericOutsideParent<String> {
 
 // Resilient subclass of generic class
 
-public class ResilientConcreteOutsideChild : ResilientGenericOutsideParent<String> {
+open class ResilientConcreteOutsideChild : ResilientGenericOutsideParent<String> {
   public override init(property: String) {
     print("ResilientConcreteOutsideChild.init(property: String)")
     super.init(property: property)
   }
 
-  public override func method() {
+  open override func method() {
     print("ResilientConcreteOutsideChild.method()")
     super.method()
   }
 
-  public override class func classMethod() {
+  open override class func classMethod() {
     print("ResilientConcreteOutsideChild.classMethod()")
     super.classMethod()
   }

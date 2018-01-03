@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,19 +19,15 @@
 
 #include "swift/AST/Type.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Optional.h"
 
 namespace llvm {
   class raw_ostream;
 }
 
 namespace swift {
-  class ArchetypeType;
-  class ProtocolConformanceRef;
-  
-/// DenseMap type used internally by Substitution::subst to track conformances
-/// applied to archetypes.
-using ArchetypeConformanceMap
-  = llvm::DenseMap<ArchetypeType*, ArrayRef<ProtocolConformanceRef>>;
+  class GenericEnvironment;
+  class SubstitutionMap;
 
 /// Substitution - A substitution into a generic specialization.
 class Substitution {
@@ -52,82 +48,20 @@ public:
   
   Substitution(Type Replacement, ArrayRef<ProtocolConformanceRef> Conformance);
 
+  /// Checks whether the current substitution is canonical.
+  bool isCanonical() const;
+
+  /// Get the canonicalized substitution. If wasCanonical is not nullptr,
+  /// store there whether the current substitution was canonical already.
+  Substitution getCanonicalSubstitution(bool *wasCanonical = nullptr) const;
+
   bool operator!=(const Substitution &other) const { return !(*this == other); }
   bool operator==(const Substitution &other) const;
   void print(llvm::raw_ostream &os,
              const PrintOptions &PO = PrintOptions()) const;
   void dump() const;
-  
-  /// Substitute the replacement and conformance types with the given
-  /// substitution vector.
-  Substitution subst(ModuleDecl *module,
-                     GenericParamList *context,
-                     ArrayRef<Substitution> subs) const;
-  
-private:
-  friend class ProtocolConformance;
-  
-  Substitution subst(ModuleDecl *module,
-                     ArrayRef<Substitution> subs,
-                     TypeSubstitutionMap &subMap,
-                     ArchetypeConformanceMap &conformanceMap) const;
+  void dump(llvm::raw_ostream &os, unsigned indent = 0) const;
 };
-
-/// An iterator over a list of archetypes and the substitutions
-/// applied to them.
-class SubstitutionIterator {
-  // TODO: this should use dependent types when getConformsTo() becomes
-  // efficient there.
-  ArrayRef<ArchetypeType*> Archetypes;
-  ArrayRef<Substitution> Subs;
-
-public:
-  SubstitutionIterator() = default;
-  explicit SubstitutionIterator(GenericParamList *params,
-                                ArrayRef<Substitution> subs);
-
-  struct iterator {
-    ArchetypeType * const *NextArch = nullptr;
-    const Substitution *NextSub = nullptr;
-
-    iterator() = default;
-    iterator(ArchetypeType * const *nextArch, const Substitution *nextSub)
-      : NextArch(nextArch), NextSub(nextSub) {}
-
-    iterator &operator++() {
-      ++NextArch;
-      ++NextSub;
-      return *this;
-    }
-
-    iterator operator++(int) {
-      iterator copy = *this;
-      ++*this;
-      return copy;
-    }
-
-    std::pair<ArchetypeType*,Substitution> operator*() const {
-      return { *NextArch, *NextSub };
-    }
-
-    bool operator==(const iterator &other) const {
-      assert((NextSub == other.NextSub) == (NextArch == other.NextArch));
-      return NextSub == other.NextSub;
-    }
-    bool operator!=(const iterator &other) const {
-      return !(*this == other);
-    }
-  };
-
-  ArrayRef<Substitution> getSubstitutions() const { return Subs; }
-
-  bool empty() const { return Archetypes.empty(); }
-
-  iterator begin() const { return { Archetypes.begin(), Subs.begin() }; }
-  iterator end() const { return { Archetypes.end(), Subs.end() }; }
-};
-
-void dump(const ArrayRef<Substitution> &subs);
 
 } // end namespace swift
 

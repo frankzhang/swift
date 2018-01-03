@@ -1,9 +1,22 @@
-// RUN: %target-swift-frontend %s -parse -verify
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
-// Distributed under the terms of the MIT license
-// Test case submitted to project by https://github.com/jvasileff (John Vasileff)
+// RUN: %target-swift-frontend %s -typecheck -verify
+
+// Issue found by https://github.com/jvasileff (John Vasileff)
 // This bug is NOT triggered when compiling with -O.
 
-func f<T : BooleanType>(b: T) {
+protocol BooleanProtocol {
+  var boolValue: Bool { get }
 }
-f(true as BooleanType) // expected-error {{cannot invoke 'f' with an argument list of type '(BooleanType)'}} // expected-note {{expected an argument list of type '(T)'}}
+extension Bool : BooleanProtocol {
+  var boolValue: Bool { return self }
+}
+func f<T : BooleanProtocol>(_ b: T) {
+}
+f(true as BooleanProtocol) // expected-error {{cannot invoke 'f' with an argument list of type '(BooleanProtocol)'}} // expected-note {{expected an argument list of type '(T)'}}

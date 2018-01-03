@@ -1,10 +1,11 @@
-// RUN: not %target-swift-frontend %s -parse
+// This source file is part of the Swift.org open source project
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
-
-// Distributed under the terms of the MIT license
-// Test case submitted to project by https://github.com/practicalswift (practicalswift)
-// Test case found by fuzzing
-
+// RUN: not %target-swift-frontend %s -typecheck
 extension NSSet {
 enum b {
 struct S : NSManagedObject {
@@ -29,7 +30,7 @@ class a: P> Any, x }
 import CoreData
 protocol b = e: d where Optional<T> == a(c(2, Any)
 var e> Any) -> [Byte]()
-let foo as [c] = i((self.<h : d = b() -> ("[1, object2)(c<T>>(m: 1, U.Generator.A: T>, a() -> U) -> {
+let foo as [c] = i((self.<h : d = b() -> ("[1, object2)(c<T>>(m: 1, U.Iterator.A: T>, a() -> U) -> {
 enum A {
 class a<T {
 protocol a : a {

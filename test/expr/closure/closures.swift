@@ -1,9 +1,9 @@
-// RUN: %target-parse-verify-swift
+// RUN: %target-typecheck-verify-swift
 
-var func6 : (fn : (Int,Int) -> Int) -> ()
+var func6 : (_ fn : (Int,Int) -> Int) -> ()
 var func6a : ((Int, Int) -> Int) -> ()
 var func6b : (Int, (Int, Int) -> Int) -> ()
-func func6c(f: (Int, Int) -> Int, _ n: Int = 0) {} // expected-warning{{prior to parameters}}
+func func6c(_ f: (Int, Int) -> Int, _ n: Int = 0) {}
 
 
 // Expressions can be auto-closurified, so that they can be evaluated separately
@@ -14,7 +14,8 @@ var closure3a : () -> () -> (Int,Int) = {{ (4, 2) }} // multi-level closing.
 var closure3b : (Int,Int) -> (Int) -> (Int,Int) = {{ (4, 2) }} // expected-error{{contextual type for closure argument list expects 2 arguments, which cannot be implicitly ignored}}  {{52-52=_,_ in }}
 var closure4 : (Int,Int) -> Int = { $0 + $1 }
 var closure5 : (Double) -> Int = {
-       $0 + 1.0  // expected-error {{cannot convert value of type 'Double' to expected argument type 'Int'}}
+       $0 + 1.0
+       // expected-error@+1 {{cannot convert value of type 'Double' to closure result type 'Int'}}
 }
 
 var closure6 = $0  // expected-error {{anonymous closure argument not contained in a closure}}
@@ -22,21 +23,26 @@ var closure6 = $0  // expected-error {{anonymous closure argument not contained 
 var closure7 : Int =
    { 4 }  // expected-error {{function produces expected type 'Int'; did you mean to call it with '()'?}} {{9-9=()}}
 
-func funcdecl1(a: Int, _ y: Int) {}
-func funcdecl3() -> Int {}
-func funcdecl4(a: ((Int) -> Int), _ b: Int) {}
+var capturedVariable = 1
+var closure8 = { [capturedVariable] in
+  capturedVariable += 1 // expected-error {{left side of mutating operator isn't mutable: 'capturedVariable' is an immutable capture}}
+}
 
-func funcdecl5(a: Int, _ y: Int) {
+func funcdecl1(_ a: Int, _ y: Int) {}
+func funcdecl3() -> Int {}
+func funcdecl4(_ a: ((Int) -> Int), _ b: Int) {}
+
+func funcdecl5(_ a: Int, _ y: Int) {
   // Pass in a closure containing the call to funcdecl3.
   funcdecl4({ funcdecl3() }, 12)  // expected-error {{contextual type for closure argument list expects 1 argument, which cannot be implicitly ignored}} {{14-14= _ in}}
   
   
-  func6(fn: {$0 + $1})       // Closure with two named anonymous arguments
-  func6(fn: {($0) + $1})    // Closure with sequence expr inferred type
-  func6(fn: {($0) + $0})    // expected-error{{cannot convert value of type '(Int, Int)' to expected argument type 'Int'}}
+  func6({$0 + $1})       // Closure with two named anonymous arguments
+  func6({($0) + $1})    // Closure with sequence expr inferred type
+  func6({($0) + $0})    // // expected-error {{contextual closure type '(Int, Int) -> Int' expects 2 arguments, but 1 was used in closure body}}
 
 
-  var testfunc : ((), Int) -> Int
+  var testfunc : ((), Int) -> Int  // expected-note {{'testfunc' declared here}}
   testfunc({$0+1})  // expected-error {{missing argument for parameter #2 in call}}
 
   funcdecl5(1, 2) // recursion.
@@ -50,22 +56,22 @@ func funcdecl5(a: Int, _ y: Int) {
   funcdecl1(123, 444)
   
   // Calls.
-  4()  // expected-error {{invalid use of '()' to call a value of non-function type 'Int'}} {{4-6=}}
+  4()  // expected-error {{cannot call value of non-function type 'Int'}}{{4-6=}}
   
   
   // rdar://12017658 - Infer some argument types from func6.
-  func6(fn: { a, b -> Int in a+b})
+  func6({ a, b -> Int in a+b})
   // Return type inference.
-  func6(fn: { a,b in a+b })
+  func6({ a,b in a+b })
   
   // Infer incompatible type.
-  func6(fn: {a,b -> Float in 4.0 })    // expected-error {{declared closure result 'Float' is incompatible with contextual type 'Int'}} {{21-26=Int}}  // Pattern doesn't need to name arguments.
-  func6(fn: { _,_ in 4 })
+  func6({a,b -> Float in 4.0 })    // expected-error {{declared closure result 'Float' is incompatible with contextual type 'Int'}} {{17-22=Int}}  // Pattern doesn't need to name arguments.
+  func6({ _,_ in 4 })
   
-  func6(fn: {a,b in 4.0 })  // expected-error {{cannot convert value of type 'Double' to closure result type 'Int'}}
+  func6({a,b in 4.0 })  // expected-error {{cannot convert value of type 'Double' to closure result type 'Int'}}
   
   // TODO: This diagnostic can be improved: rdar://22128205
-  func6(fn: {(a : Float, b) in 4 }) // expected-error {{cannot convert value of type '(Float, _) -> Int' to expected argument type '(Int, Int) -> Int'}}
+  func6({(a : Float, b) in 4 }) // expected-error {{cannot convert value of type '(Float, _) -> Int' to expected argument type '(Int, Int) -> Int'}}
 
   
   
@@ -80,7 +86,7 @@ func funcdecl5(a: Int, _ y: Int) {
 
 func unlabeledClosureArgument() {
 
-  func add(x: Int, y: Int) -> Int { return x + y }
+  func add(_ x: Int, y: Int) -> Int { return x + y }
   func6a({$0 + $1}) // single closure argument
   func6a(add)
   func6b(1, {$0 + $1}) // second arg is closure
@@ -90,7 +96,7 @@ func unlabeledClosureArgument() {
 }
 
 // rdar://11935352 - closure with no body.
-func closure_no_body(p: () -> ()) {
+func closure_no_body(_ p: () -> ()) {
   return closure_no_body({})
 }
 
@@ -105,7 +111,7 @@ func t() {
 }
 
 // <rdar://problem/11927184>
-func f0(a: Any) -> Int { return 1 }
+func f0(_ a: Any) -> Int { return 1 }
 assert(f0(1) == 1)
 
 
@@ -123,13 +129,22 @@ var shadowedShort = { (shadowedShort: Int) -> Int in shadowedShort+1 } // no-war
 
 
 func anonymousClosureArgsInClosureWithArgs() {
+  func f(_: String) {}
   var a1 = { () in $0 } // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments}}
   var a2 = { () -> Int in $0 } // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments}}
-  var a3 = { (z: Int) in $0 } // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments}}
+  var a3 = { (z: Int) in $0 } // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments; did you mean 'z'?}} {{26-28=z}}
+  var a4 = { (z: [Int], w: [Int]) in
+    f($0.count) // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments; did you mean 'z'?}} {{7-9=z}} expected-error {{cannot convert value of type 'Int' to expected argument type 'String'}}
+    f($1.count) // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments; did you mean 'w'?}} {{7-9=w}} expected-error {{cannot convert value of type 'Int' to expected argument type 'String'}}
+  }
+  var a5 = { (_: [Int], w: [Int]) in
+    f($0.count) // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments}}
+    f($1.count) // expected-error {{anonymous closure arguments cannot be used inside a closure that has explicit arguments; did you mean 'w'?}} {{7-9=w}} expected-error {{cannot convert value of type 'Int' to expected argument type 'String'}}
+  }
 }
 
-func doStuff(fn : () -> Int) {}
-func doVoidStuff(fn : () -> ()) {}
+func doStuff(_ fn : @escaping () -> Int) {}
+func doVoidStuff(_ fn : @escaping () -> ()) {}
 
 // <rdar://problem/16193162> Require specifying self for locations in code where strong reference cycles are likely
 class ExplicitSelfRequiredTest {
@@ -142,7 +157,7 @@ class ExplicitSelfRequiredTest {
 
     // Methods follow the same rules as properties, uses of 'self' must be marked with "self."
     doStuff { method() }  // expected-error {{call to method 'method' in closure requires explicit 'self.' to make capture semantics explicit}} {{15-15=self.}}
-    doVoidStuff { method() }  // expected-error {{call to method 'method' in closure requires explicit 'self.' to make capture semantics explicit}} {{19-19=self.}}
+    doVoidStuff { _ = method() }  // expected-error {{call to method 'method' in closure requires explicit 'self.' to make capture semantics explicit}} {{23-23=self.}}
     doStuff { self.method() }
 
     // <rdar://problem/18877391> "self." shouldn't be required in the initializer expression in a capture list
@@ -157,16 +172,13 @@ class ExplicitSelfRequiredTest {
   }
 }
 
-// expected-error@+2 {{Use of 'var' binding here is not allowed}} {{57-60=}}
-// expected-warning@+1 {{'let' keyword is unnecessary; function parameters are immutable by default}} {{64-68=}}
-var testClosureArgumentPatterns: (Int, Int) -> Int = { (var x, let y) in x+y+1 }
 
 class SomeClass {
   var field : SomeClass?
   func foo() -> Int {}
 }
 
-func testCaptureBehavior(ptr : SomeClass) {
+func testCaptureBehavior(_ ptr : SomeClass) {
   // Test normal captures.
   weak var wv : SomeClass? = ptr
   unowned let uv : SomeClass = ptr
@@ -230,12 +242,12 @@ var closureWithObservedProperty: () -> () = {
 
 ;
 
-{}() // expected-error{{statement cannot begin with a closure expression}} expected-note{{explicitly discard the result of the closure by assigning to '_'}} {{1-1=_ = }}
+{}() // expected-error{{top-level statement cannot begin with a closure expression}}
 
 
 
 // rdar://19179412 - Crash on valid code.
-func rdar19179412() -> Int -> Int {
+func rdar19179412() -> (Int) -> Int {
   return { x in
     class A {
       let d : Int = 0
@@ -244,10 +256,12 @@ func rdar19179412() -> Int -> Int {
 }
 
 // Test coercion of single-expression closure return types to void.
-func takesVoidFunc(f: () -> ()) {}
+func takesVoidFunc(_ f: () -> ()) {}
 var i: Int = 1
 
+// expected-warning @+1 {{expression of type 'Int' is unused}}
 takesVoidFunc({i})
+// expected-warning @+1 {{expression of type 'Int' is unused}}
 var f1: () -> () = {i}
 var x = {return $0}(1)
 
@@ -260,39 +274,36 @@ Void(0) // expected-error{{argument passed to call that takes no arguments}}
 _ = {0}
 
 // <rdar://problem/22086634> "multi-statement closures require an explicit return type" should be an error not a note
-let samples = {   // expected-error {{type of expression is ambiguous without more context}}
-  // FIXME: This diagnostic should be improved, we can infer a type for the closure expr from
-  // its body (by trying really hard in diagnostic generation) and say that we need an explicit
-  // contextual result specified because we don't do cross-statement type inference or something.
+let samples = {   // expected-error {{unable to infer complex closure return type; add explicit type to disambiguate}} {{16-16= () -> Bool in }}
           if (i > 10) { return true }
           else { return false }
         }()
 
 // <rdar://problem/19756953> Swift error: cannot capture '$0' before it is declared
-func f(fp : (Bool, Bool) -> Bool) {}
+func f(_ fp : (Bool, Bool) -> Bool) {}
 f { $0 && !$1 }
 
 
 // <rdar://problem/18123596> unexpected error on self. capture inside class method
-func TakesIntReturnsVoid(fp : (Int -> ())) {}
+func TakesIntReturnsVoid(_ fp : ((Int) -> ())) {}
 
 struct TestStructWithStaticMethod {
-  static func myClassMethod(count: Int) {
+  static func myClassMethod(_ count: Int) {
     // Shouldn't require "self."
     TakesIntReturnsVoid { _ in myClassMethod(0) }
   }
 }
 
 class TestClassWithStaticMethod {
-  class func myClassMethod(count: Int) {
+  class func myClassMethod(_ count: Int) {
     // Shouldn't require "self."
     TakesIntReturnsVoid { _ in myClassMethod(0) }
   }
 }
 
 // Test that we can infer () as the result type of these closures.
-func genericOne<T>(a: () -> T) {}
-func genericTwo<T>(a: () -> T, _ b: () -> T) {}
+func genericOne<T>(_ a: () -> T) {}
+func genericTwo<T>(_ a: () -> T, _ b: () -> T) {}
 genericOne {}
 genericTwo({}, {})
 
@@ -315,6 +326,31 @@ func r21375863() {
   var width = 0
   var height = 0
   var bufs: [[UInt8]] = (0..<4).map { _ -> [asdf] in  // expected-error {{use of undeclared type 'asdf'}}
-    [UInt8](count: width*height, repeatedValue: 0)
+    [UInt8](repeating: 0, count: width*height)
+  }
+}
+
+// <rdar://problem/25993258>
+//   Don't crash if we infer a closure argument to have a tuple type containing inouts.
+func r25993258_helper(_ fn: (inout Int, Int) -> ()) {}
+func r25993258a() {
+  r25993258_helper { x in () } // expected-error {{named parameter has type '(inout Int, Int)' which includes nested inout parameters}}
+}
+func r25993258b() {
+  r25993258_helper { _ in () }
+}
+
+// We have to map the captured var type into the right generic environment.
+class GenericClass<T> {}
+
+func lvalueCapture<T>(c: GenericClass<T>) {
+  var cc = c
+  weak var wc = c
+
+  func innerGeneric<U>(_: U) {
+    _ = cc
+    _ = wc
+
+    cc = wc!
   }
 }

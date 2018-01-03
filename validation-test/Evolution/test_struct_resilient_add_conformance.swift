@@ -1,47 +1,11 @@
-// RUN: rm -rf %t && mkdir -p %t/before && mkdir -p %t/after
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/struct_resilient_add_conformance.swift -o %t/before/struct_resilient_add_conformance.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/struct_resilient_add_conformance.swift -o %t/before/struct_resilient_add_conformance.o
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/struct_resilient_add_conformance.swift -o %t/after/struct_resilient_add_conformance.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/struct_resilient_add_conformance.swift -o %t/after/struct_resilient_add_conformance.o
-
-// RUN: %target-build-swift -D BEFORE -c %s -I %t/before -o %t/before/main.o
-// RUN: %target-build-swift -D AFTER -c %s -I %t/after -o %t/after/main.o
-
-// RUN: %target-build-swift %t/before/struct_resilient_add_conformance.o %t/before/main.o -o %t/before_before
-// RUN: %target-build-swift %t/before/struct_resilient_add_conformance.o %t/after/main.o -o %t/before_after
-// RUN: %target-build-swift %t/after/struct_resilient_add_conformance.o %t/before/main.o -o %t/after_before
-// RUN: %target-build-swift %t/after/struct_resilient_add_conformance.o %t/after/main.o -o %t/after_after
-
-// RUN: %target-run %t/before_before
-// RUN: %target-run %t/before_after
-// RUN: %target-run %t/after_before
-// RUN: %target-run %t/after_after
-
-// Requires protocol conformance tables to be able to reference
-// resilient type metadata
-// XFAIL: *
+// RUN: %target-resilience-test
+// REQUIRES: executable_test
 
 import StdlibUnittest
 import struct_resilient_add_conformance
 
-var StructResilientAddConformanceTest = TestSuite("StructResilientAddConformance")
 
-// FIXME: Once we have availability information for conformances, we can
-// make this non-generic as long as we're careful to never directly
-// reference an unavailable conformance table symbol
-@inline(never) func workWithPointLike<T>(t: T) {
-  if getVersion() > 0 {
-    var p = t as! PointLike
-    p.x = 30
-    p.y = 40
-    expectEqual(p.x, 30)
-    expectEqual(p.y, 40)
-  } else {
-    expectEqual(t is PointLike, false)
-  }
-}
+var StructResilientAddConformanceTest = TestSuite("StructResilientAddConformance")
 
 StructResilientAddConformanceTest.test("AddConformance") {
   var t = AddConformance()
@@ -53,7 +17,11 @@ StructResilientAddConformanceTest.test("AddConformance") {
     expectEqual(t.y, 20)
   }
 
-  workWithPointLike(t)
+  if (getVersion() == 0) {
+    expectEqual(workWithPointLike(t), 0)
+  } else {
+    expectEqual(workWithPointLike(t), 200)
+  }
 }
 
 #if AFTER
@@ -69,6 +37,14 @@ protocol MyPoint3DLike {
 extension AddConformance : MyPointLike {}
 extension AddConformance : MyPoint3DLike {}
 
+@inline(never) func workWithMyPointLike<T>(_ t: T) {
+  var p = t as! MyPointLike
+  p.x = 50
+  p.y = 60
+  expectEqual(p.x, 50)
+  expectEqual(p.y, 60)
+}
+
 StructResilientAddConformanceTest.test("MyPointLike") {
   var p: MyPointLike = AddConformance()
 
@@ -78,6 +54,8 @@ StructResilientAddConformanceTest.test("MyPointLike") {
     expectEqual(p.x, 50)
     expectEqual(p.y, 60)
   }
+
+  workWithMyPointLike(p)
 }
 #endif
 

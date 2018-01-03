@@ -1,9 +1,11 @@
-// RUN: not %target-swift-frontend %s -parse
+// This source file is part of the Swift.org open source project
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
-// Distributed under the terms of the MIT license
-// Test case submitted to project by https://github.com/practicalswift (practicalswift)
-// Test case found by fuzzing
-
+// RUN: not %target-swift-frontend %s -typecheck
 protocol A : A, b {
 (h: a {
 typealias b : b: a {
@@ -18,6 +20,6 @@ func b.<j : e?) ->(.E == e> Any, U) {
 }
 }
 }
-var d where k) -> <d.B : CollectionType where f: A) as String
+var d where k) -> <d.B : Collection where f: A) as String
 var a: Array<d>Bool]()
 typealias d.co

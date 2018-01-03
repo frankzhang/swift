@@ -1,4 +1,4 @@
-// RUN: %target-sil-opt -enable-sil-verify-all -deadobject-elim %s | FileCheck %s
+// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -deadobject-elim %s | %FileCheck %s
 
 import Swift
 import Builtin
@@ -14,7 +14,7 @@ class TrivialDestructor {
   deinit { }
 }
 
-sil @_TFC4main17TrivialDestructorD : $@convention(method) (@owned TrivialDestructor) -> () {
+sil @_T04main17TrivialDestructorCfD : $@convention(method) (@owned TrivialDestructor) -> () {
 bb0(%0 : $TrivialDestructor):
   // Alloc/Dealloc stack should not disrupt elimination of the
   // alloc_ref.
@@ -101,7 +101,7 @@ sil @trivial_destructor_store_into : $@convention(thin) () -> () {
   return %4 : $()
 }
 
-// We store a pointer from the alloc_ref, dont do anything!
+// We store a pointer from the alloc_ref, don't do anything!
 //
 // CHECK-LABEL: sil @trivial_destructor_store_ptr
 // CHECK: bb0

@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,7 +18,7 @@
 #include "swift/AST/ParameterList.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/Expr.h"
-#include "swift/AST/ExprHandle.h"
+#include "swift/AST/Types.h"
 using namespace swift;
 
 /// TODO: unique and reuse the () parameter list in ASTContext, it is common to
@@ -30,15 +30,14 @@ ParameterList::create(const ASTContext &C, SourceLoc LParenLoc,
   assert(LParenLoc.isValid() == RParenLoc.isValid() &&
          "Either both paren locs are valid or neither are");
   
-  auto byteSize = sizeof(ParameterList)+params.size()*sizeof(ParamDecl*);
+  auto byteSize = totalSizeToAlloc<ParamDecl *>(params.size());
   auto rawMem = C.Allocate(byteSize, alignof(ParameterList));
   
   //  Placement initialize the ParameterList and the Parameter's.
   auto PL = ::new (rawMem) ParameterList(LParenLoc, params.size(), RParenLoc);
 
-  for (size_t i = 0, e = params.size(); i != e; ++i)
-    ::new (&PL->get(i)) ParamDecl*(params[i]);
-  
+  std::uninitialized_copy(params.begin(), params.end(), PL->getArray().begin());
+
   return PL;
 }
 
@@ -48,9 +47,25 @@ ParameterList::create(const ASTContext &C, SourceLoc LParenLoc,
 /// Note that this decl is created, but it is returned with an incorrect
 /// DeclContext that needs to be set correctly.  This is automatically handled
 /// when a function is created with this as part of its argument list.
+/// For a generic context, this also gives the parameter an unbound generic
+/// type with the expectation that type-checking will fill in the context
+/// generic parameters.
+ParameterList *ParameterList::createUnboundSelf(SourceLoc loc,
+                                                DeclContext *DC) {
+  auto *PD = ParamDecl::createUnboundSelf(loc, DC);
+  return create(DC->getASTContext(), PD);
+}
+
+/// Create an implicit 'self' decl for a method in the specified decl context.
+/// If 'static' is true, then this is self for a static method in the type.
 ///
-ParameterList *ParameterList::createSelf(SourceLoc loc, DeclContext *DC,
-                                         bool isStaticMethod, bool isInOut) {
+/// Note that this decl is created, but it is returned with an incorrect
+/// DeclContext that needs to be set correctly.  This is automatically handled
+/// when a function is created with this as part of its argument list.
+ParameterList *ParameterList::createSelf(SourceLoc loc,
+                                         DeclContext *DC,
+                                         bool isStaticMethod,
+                                         bool isInOut) {
   auto *PD = ParamDecl::createSelf(loc, DC, isStaticMethod, isInOut);
   return create(DC->getASTContext(), PD);
 }
@@ -61,8 +76,6 @@ void ParameterList::setDeclContextOfParamDecls(DeclContext *DC) {
   for (auto P : *this)
     P->setDeclContext(DC);
 }
-
-
 
 /// Make a duplicate copy of this parameter list.  This allocates copies of
 /// the ParamDecls, so they can be reparented into a new DeclContext.
@@ -75,8 +88,12 @@ ParameterList *ParameterList::clone(const ASTContext &C,
   SmallVector<ParamDecl*, 8> params(begin(), end());
 
   // Remap the ParamDecls inside of the ParameterList.
+  bool withTypes = !options.contains(ParameterList::WithoutTypes);
   for (auto &decl : params) {
-    decl = new (C) ParamDecl(decl);
+    bool hadDefaultArgument =
+        decl->getDefaultArgumentKind() == DefaultArgumentKind::Normal;
+
+    decl = new (C) ParamDecl(decl, withTypes);
     if (options & Implicit)
       decl->setImplicit();
 
@@ -87,17 +104,20 @@ ParameterList *ParameterList::clone(const ASTContext &C,
       decl->setName(C.getIdentifier("argument"));
     
     // If we're inheriting a default argument, mark it as such.
-    if (decl->isDefaultArgument() && (options & Inherited)) {
-      decl->setDefaultArgumentKind(DefaultArgumentKind::Inherited);
-      decl->setDefaultValue(nullptr);
+    // FIXME: Figure out how to clone default arguments as well.
+    if (hadDefaultArgument) {
+      if (options & Inherited)
+        decl->setDefaultArgumentKind(DefaultArgumentKind::Inherited);
+      else
+        decl->setDefaultArgumentKind(DefaultArgumentKind::None);
     }
   }
   
   return create(C, params);
 }
 
-/// Return a TupleType or ParenType for this parameter list.  This returns a
-/// null type if one of the ParamDecls does not have a type set for it yet.
+/// Return a TupleType or ParenType for this parameter list, written in terms
+/// of contextual archetypes.
 Type ParameterList::getType(const ASTContext &C) const {
   if (size() == 0)
     return TupleType::getEmpty(C);
@@ -105,14 +125,33 @@ Type ParameterList::getType(const ASTContext &C) const {
   SmallVector<TupleTypeElt, 8> argumentInfo;
   
   for (auto P : *this) {
-    if (!P->hasType()) return Type();
+    auto type = P->getType();
     
-    argumentInfo.push_back({
-      P->getType(), P->getArgumentName(),
-      P->getDefaultArgumentKind(), P->isVariadic()
-    });
+    argumentInfo.emplace_back(
+        type->getInOutObjectType(), P->getArgumentName(),
+        ParameterTypeFlags::fromParameterType(type, P->isVariadic(), P->isShared()).withInOut(P->isInOut()));
   }
-  
+
+  return TupleType::get(argumentInfo, C);
+}
+
+/// Return a TupleType or ParenType for this parameter list, written in terms
+/// of interface types.
+Type ParameterList::getInterfaceType(const ASTContext &C) const {
+  if (size() == 0)
+    return TupleType::getEmpty(C);
+
+  SmallVector<TupleTypeElt, 8> argumentInfo;
+
+  for (auto P : *this) {
+    auto type = P->getInterfaceType();
+    assert(!type->hasArchetype());
+
+    argumentInfo.emplace_back(
+        type->getInOutObjectType(), P->getArgumentName(),
+        ParameterTypeFlags::fromParameterType(type, P->isVariadic(), P->isShared()).withInOut(P->isInOut()));
+  }
+
   return TupleType::get(argumentInfo, C);
 }
 
@@ -121,17 +160,17 @@ Type ParameterList::getType(const ASTContext &C) const {
 /// returns the specified result type.  This returns a null type if one of the
 /// ParamDecls does not have a type set for it yet.
 ///
-Type ParameterList::getFullType(Type resultType, ArrayRef<ParameterList*> PLL) {
+Type ParameterList::getFullInterfaceType(Type resultType,
+                                         ArrayRef<ParameterList*> PLL,
+                                         const ASTContext &C) {
   auto result = resultType;
-  auto &C = result->getASTContext();
-  
   for (auto PL : reversed(PLL)) {
-    auto paramType = PL->getType(C);
-    if (!paramType) return Type();
+    auto paramType = PL->getInterfaceType(C);
     result = FunctionType::get(paramType, result);
   }
   return result;
 }
+
 
 /// Return the full source range of this parameter list.
 SourceRange ParameterList::getSourceRange() const {

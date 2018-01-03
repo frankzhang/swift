@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -86,12 +86,18 @@
 #define DECL_RANGE(Id, First, Last)
 #endif
 
+#ifndef LAST_DECL
+#define LAST_DECL(Id)
+#endif
+
 DECL(Import, Decl)
 EXTENSION_DECL(Extension, Decl)
 DECL(PatternBinding, Decl)
 DECL(EnumCase, Decl)
 CONTEXT_DECL(TopLevelCode, Decl)
 DECL(IfConfig, Decl)
+DECL(PrecedenceGroup, Decl)
+DECL(MissingMember, Decl)
 
 ABSTRACT_DECL(Operator, Decl)
   OPERATOR_DECL(InfixOperator, OperatorDecl)
@@ -101,23 +107,25 @@ ABSTRACT_DECL(Operator, Decl)
 
 ABSTRACT_DECL(Value, Decl)
   ABSTRACT_DECL(Type, ValueDecl)
-    VALUE_DECL(TypeAlias, TypeDecl)
     ABSTRACT_DECL(AbstractTypeParam, TypeDecl)
       VALUE_DECL(GenericTypeParam, AbstractTypeParamDecl)
       VALUE_DECL(AssociatedType, AbstractTypeParamDecl)
       DECL_RANGE(AbstractTypeParam, GenericTypeParam, AssociatedType)
-    ABSTRACT_DECL(NominalType, TypeDecl)
-      NOMINAL_TYPE_DECL(Enum, NominalTypeDecl)
-      NOMINAL_TYPE_DECL(Struct, NominalTypeDecl)
-      NOMINAL_TYPE_DECL(Class, NominalTypeDecl)
-      NOMINAL_TYPE_DECL(Protocol, NominalTypeDecl)
-      DECL_RANGE(NominalType, Enum, Protocol)
+    ABSTRACT_DECL(GenericType, TypeDecl)
+      CONTEXT_VALUE_DECL(TypeAlias, GenericTypeDecl)
+      ABSTRACT_DECL(NominalType, GenericTypeDecl)
+        NOMINAL_TYPE_DECL(Enum, NominalTypeDecl)
+        NOMINAL_TYPE_DECL(Struct, NominalTypeDecl)
+        NOMINAL_TYPE_DECL(Class, NominalTypeDecl)
+        NOMINAL_TYPE_DECL(Protocol, NominalTypeDecl)
+        DECL_RANGE(NominalType, Enum, Protocol)
+      DECL_RANGE(GenericType, TypeAlias, Protocol)
     CONTEXT_VALUE_DECL(Module, TypeDecl)
-    DECL_RANGE(Type, TypeAlias, Module)
+    DECL_RANGE(Type, GenericTypeParam, Module)
   ABSTRACT_DECL(AbstractStorage, ValueDecl)
     VALUE_DECL(Var, AbstractStorageDecl)
       VALUE_DECL(Param, VarDecl)
-    VALUE_DECL(Subscript, AbstractStorageDecl)
+    CONTEXT_VALUE_DECL(Subscript, AbstractStorageDecl)
     DECL_RANGE(AbstractStorage, Var, Subscript)
   ABSTRACT_DECL(AbstractFunction, ValueDecl)
     FUNCTION_DECL(Constructor, AbstractFunctionDecl)
@@ -125,7 +133,8 @@ ABSTRACT_DECL(Value, Decl)
     FUNCTION_DECL(Func, AbstractFunctionDecl)
     DECL_RANGE(AbstractFunction, Constructor, Func)
   VALUE_DECL(EnumElement, ValueDecl)
-  DECL_RANGE(Value, TypeAlias, EnumElement)
+  DECL_RANGE(Value, GenericTypeParam, EnumElement)
+LAST_DECL(EnumElement)
 
 #undef NOMINAL_TYPE_DECL
 #undef VALUE_DECL
@@ -136,3 +145,4 @@ ABSTRACT_DECL(Value, Decl)
 #undef CONTEXT_VALUE_DECL
 #undef EXTENSION_DECL
 #undef DECL
+#undef LAST_DECL

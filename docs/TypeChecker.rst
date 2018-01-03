@@ -22,11 +22,11 @@ parametric polymorphism. Swift makes extensive use of type inference,
 allowing one to omit the types of many variables and expressions. For
 example::
 
-  func round(x: Double) -> Int { /* ... */ }
+  func round(_ x: Double) -> Int { /* ... */ }
   var pi: Double = 3.14159
   var three = round(pi) // 'three' has type 'Int'
 
-  func identity<T>(x: T) -> T { return x }
+  func identity<T>(_ x: T) -> T { return x }
   var eFloat: Float = -identity(2.71828)  // numeric literal gets type 'Float'
 
 Swift's type inference allows type information to flow in two
@@ -103,7 +103,7 @@ the Swift type system:
   An equality constraint requires two types to be identical. For
   example, the constraint ``T0 == T1`` effectively ensures that ``T0`` and
   ``T1`` get the same concrete type binding. There are two different
-  flavors of equality constraints: 
+  flavors of equality constraints:
 
     - Exact equality constraints, or  "binding", written ``T0 := X``
       for some type variable ``T0`` and type ``X``, which requires
@@ -153,7 +153,7 @@ the Swift type system:
   second, i.e., for ``x as T``.
 
 **Applicable function**
-  An applicable function requires that both types are function types 
+  An applicable function requires that both types are function types
   with the same input and output types. It is used when the function
   type on the left-hand side is being split into its input and output
   types for function application purposes. Note, that it does not
@@ -201,7 +201,7 @@ The process of constraint generation produces a constraint system
 that relates the types of the various subexpressions within an
 expression. Programmatically, constraint generation walks an
 expression from the leaves up to the root, assigning a type (which
-often involves type variables) to each subexpression as it goes. 
+often involves type variables) to each subexpression as it goes.
 
 Constraint generation is driven by the syntax of the
 expression, and each different kind of expression---function
@@ -224,7 +224,7 @@ and types generated from the primary expression kinds are:
   section. Additionally, when the name refers to a generic function or
   a generic type, the declaration reference may introduce new type
   variables; see the `Polymorphic Types`_ section for more information.
- 
+
 **Member reference**
   A member reference expression ``a.b`` is assigned the type ``T0``
   for a fresh type variable ``T0``. In addition, the expression
@@ -336,8 +336,8 @@ Overloading is the process of giving multiple, different definitions
 to the same name. For example, we might overload a ``negate`` function
 to work on both ``Int`` and ``Double`` types, e.g.::
 
-  func negate(x: Int) -> Int { return -x }
-  func negate(x: Double) -> Double { return -x }
+  func negate(_ x: Int) -> Int { return -x }
+  func negate(_ x: Double) -> Double { return -x }
 
 Given that there are two definitions of ``negate``, what is the type
 of the declaration reference expression ``negate``? If one selects the
@@ -351,7 +351,7 @@ variable (call it ``T0``) for the type of the reference to an
 overloaded declaration. Then, a disjunction constraint is introduced,
 in which each term binds that type variable (via an exact equality
 constraint) to the type produced by one of the overloads in the
-overload set. In our negate example, the disjunction is 
+overload set. In our negate example, the disjunction is
 ``T0 := (Int) -> Int or T0 := (Double) -> Double``. The constraint
 solver, discussed in the later section on `Constraint Solving`_,
 explores both possible bindings, and the overloaded reference resolves
@@ -572,7 +572,7 @@ produce derived constraint systems that explore the solution space.
 Overload Selection
 '''''''''''''''''''''''''''''''''''''''''''''''''''''
 Overload selection is the simplest way to make an assumption. For an
-overload set that introduced a disjunction constraint 
+overload set that introduced a disjunction constraint
 ``T0 := A1 or T0 := A2 or ... or T0 := AN`` into the constraint
 system, each term in the disjunction will be visited separately. Each
 solver state binds the type variable ``T0`` and explores
@@ -598,7 +598,7 @@ placed on it that relate it to concrete types, e.g., ``T0 <c Int`` or
 starting point to make educated guesses for the type ``T0``.
 
 To determine an appropriate guess, the relational constraints placed
-on the type variable are categorized. Given a relational constraint of the form 
+on the type variable are categorized. Given a relational constraint of the form
 ``T0 <? A`` (where ``<?`` is one of ``<``, ``<t``, or ``<c``), where
 ``A`` is some concrete type, ``A`` is said to be  "above"
 ``T0``. Similarly, given a constraint of the form ``B <? T0`` for a
@@ -608,7 +608,7 @@ types formed by the conversion relationship, e.g., there is an edge
 ``A -> B`` in the latter if ``A`` is convertible to ``B``. ``B`` would
 therefore be higher in the lattice than ``A``, and the topmost element
 of the lattice is the element to which all types can be converted,
-``protocol<>`` (often called "top"). 
+``Any`` (often called "top").
 
 The concrete types "above" and "below" a given type variable provide
 bounds on the possible concrete types that can be assigned to that
@@ -638,7 +638,7 @@ can be converted [#]_.
 Default Literal Types
 ..........................................
 If a type variable is bound by a conformance constraint to one of the
-literal protocols, "``T0`` conforms to ``IntegerLiteralConvertible``",
+literal protocols, "``T0`` conforms to ``ExpressibleByIntegerLiteral``",
 then the constraint solver will guess that the type variable can be
 bound to the default literal type for that protocol. For example,
 ``T0`` would get the default integer literal type ``Int``, allowing
@@ -650,7 +650,7 @@ Comparing Solutions
 The solver explores a potentially large solution space, and it is
 possible that it will find multiple solutions to the constraint system
 as given. Such cases are not necessarily ambiguities, because the
-solver can then compare the solutions to to determine whether one of
+solver can then compare the solutions to determine whether one of
 the solutions is better than all of the others. To do so, it computes
 a "score" for each solution based on a number of factors:
 
@@ -730,7 +730,7 @@ checking problem::
     func [conversion] __conversion () -> Int { /* ... */ }
   }
 
-  func f(i : Int, s : String) { }
+  func f(_ i : Int, s : String) { }
 
   var x : X
   f(10.5, x)
@@ -738,18 +738,18 @@ checking problem::
 This constraint system generates the constraints "``T(f)`` ==Fn ``T0
 -> T1``" (for fresh variables ``T0`` and ``T1``), "``(T2, X) <c
 T0``" (for fresh variable ``T2``) and "``T2`` conforms to
-``FloatLiteralConvertible``". As part of the solution, after ``T0`` is
+``ExpressibleByFloatLiteral``". As part of the solution, after ``T0`` is
 replaced with ``(i : Int, s : String)``, the second of
 these constraints is broken down into "``T2 <c Int``" and "``X <c
 String``". These two constraints are interesting for different
 reasons: the first will fail, because ``Int`` does not conform to
-``FloatLiteralConvertible``. The second will succeed by selecting one
+``ExpressibleByFloatLiteral``. The second will succeed by selecting one
 of the (overloaded) conversion functions.
 
 In both of these cases, we need to map the actual constraint of
 interest back to the expressions they refer to. In the first case, we
 want to report not only that the failure occurred because ``Int`` is
-not ``FloatLiteralConvertible``, but we also want to point out where
+not ``ExpressibleByFloatLiteral``, but we also want to point out where
 the ``Int`` type actually came from, i.e., in the parameter. In the
 second case, we want to determine which of the overloaded conversion
 functions was selected to perform the conversion, so that conversion
@@ -816,7 +816,7 @@ important decisions made by the solver. However, the locators
 determined by the solver may not directly refer to the most specific
 expression for the purposes of identifying the corresponding source
 location. For example, the failed constraint "``Int`` conforms to
-``FloatLiteralConvertible``" can most specifically by centered on the
+``ExpressibleByFloatLiteral``" can most specifically by centered on the
 floating-point literal ``10.5``, but its locator is::
 
   function application -> apply argument -> tuple element #0
@@ -836,7 +836,7 @@ consider a slight modification to our example, so that the argument to
 ``f`` is provided by another call, we get a different result
 entirely::
 
-  func f(i : Int, s : String) { }
+  func f(_ i : Int, s : String) { }
   func g() -> (f : Float, x : X) { }
 
   f(g())

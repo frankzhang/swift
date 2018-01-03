@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,7 +22,6 @@
 #include "swift/AST/Type.h"
 #include "swift/AST/Types.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/Fixnum.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/PointerUnion.h"
@@ -76,6 +75,8 @@ public:
     TupleElement,
     /// \brief A tuple element referenced by name.
     NamedTupleElement,
+    /// \brief An optional payload.
+    OptionalPayload,
     /// \brief A generic argument.
     /// FIXME: Add support for named generic arguments?
     GenericArgument,
@@ -92,8 +93,6 @@ public:
     SubscriptIndex,
     /// \brief The result of a subscript expression.
     SubscriptResult,
-    /// \brief An argument to string interpolation.
-    InterpolationArgument,
     /// \brief The lookup for a constructor member.
     ConstructorMember,
     /// \brief Rvalue adjustment.
@@ -105,7 +104,7 @@ public:
     /// \brief The instance of a metatype type.
     InstanceType,
     /// \brief The generic type of a sequence.
-    SequenceGeneratorType,
+    SequenceIteratorProtocol,
     /// \brief The element type of a generator.
     GeneratorElementType,
     /// \brief The element of an array type.
@@ -114,11 +113,20 @@ public:
     ScalarToTuple,
     /// \brief The load of an lvalue.
     Load,
+    /// The requirement that we're matching during protocol conformance
+    /// checking.
+    Requirement,
     /// The candidate witness during protocol conformance checking.
     Witness,
     /// This is referring to a type produced by opening a generic type at the
     /// base of the locator.
     OpenedGeneric,
+    /// A component of a key path.
+    KeyPathComponent,
+    /// The Nth conditional requirement in the parent locator's conformance.
+    ConditionalRequirement,
+    /// A single requirement placed on the type parameters.
+    TypeParameterRequirement,
   };
 
   /// \brief Determine the number of numeric values used for the given path
@@ -131,6 +139,7 @@ public:
     case AssociatedType:
     case FunctionArgument:
     case FunctionResult:
+    case OptionalPayload:
     case Member:
     case MemberRefBase:
     case UnresolvedMember:
@@ -142,24 +151,29 @@ public:
     case ClosureResult:
     case ParentType:
     case InstanceType:
-    case SequenceGeneratorType:
+    case SequenceIteratorProtocol:
     case GeneratorElementType:
     case ArrayElementType:
     case ScalarToTuple:
     case Load:
+    case Requirement:
     case Witness:
     case OpenedGeneric:
       return 0;
 
     case GenericArgument:
-    case InterpolationArgument:
     case NamedTupleElement:
     case TupleElement:
+    case KeyPathComponent:
+    case ConditionalRequirement:
+    case TypeParameterRequirement:
       return 1;
 
     case ApplyArgToParam:
       return 2;
     }
+
+    llvm_unreachable("Unhandled PathElementKind in switch.");
   }
 
   /// Flags for efficiently recording certain information about a path.
@@ -169,12 +183,9 @@ public:
   /// flags for a concatenated paths is simply the bitwise-or of the
   /// flags of the component paths.
   enum Flag : unsigned {
-    /// Is this not a simple path?
-    IsNotSimple = 0x1,
-
     /// Does this path involve a function conversion, i.e. a
     /// FunctionArgument or FunctionResult node?
-    IsFunctionConversion = 0x2,
+    IsFunctionConversion = 0x1,
   };
 
   static unsigned getSummaryFlagsForPathElement(PathElementKind kind) {
@@ -182,13 +193,14 @@ public:
     case ApplyArgument:
     case ApplyFunction:
     case ApplyArgToParam:
-    case SequenceGeneratorType:
+    case SequenceIteratorProtocol:
     case GeneratorElementType:
     case ArrayElementType:
     case ClosureResult:
     case ConstructorMember:
     case InstanceType:
     case Load:
+    case OptionalPayload:
     case Member:
     case MemberRefBase:
     case UnresolvedMember:
@@ -199,26 +211,26 @@ public:
     case SubscriptMember:
     case SubscriptResult:
     case OpenedGeneric:
+    case Archetype:
+    case AssociatedType:
+    case GenericArgument:
+    case NamedTupleElement:
+    case TupleElement:
+    case Requirement:
+    case Witness:
+    case KeyPathComponent:
+    case ConditionalRequirement:
+    case TypeParameterRequirement:
       return 0;
 
     case FunctionArgument:
     case FunctionResult:
       return IsFunctionConversion;
-
-    case Archetype:
-    case AssociatedType:
-    case GenericArgument:
-    case InterpolationArgument:
-    case NamedTupleElement:
-    case TupleElement:
-    case Witness:
-      return IsNotSimple;
     }
-    llvm_unreachable("bad path element kind");
+
+    llvm_unreachable("Unhandled PathElementKind in switch.");
   }
 
-  template<unsigned N> struct incomplete;
-  
   /// \brief One element in the path of a locator, which can include both
   /// a kind (PathElementKind) and a value used to describe specific
   /// kinds further (e.g., the position of a tuple element).
@@ -226,13 +238,10 @@ public:
     /// \brief Describes the kind of data stored here.
     enum StoredKind : unsigned char {
       StoredArchetype,
-      StoredAssociatedType,
+      StoredRequirement,
       StoredWitness,
       StoredKindAndValue
     };
-
-    /// \brief The type of storage used for a kind and numeric value.
-    typedef llvm::Fixnum<62> KindAndValueStorage;
 
     /// \brief The actual storage for the path element, which involves both a
     /// kind and (potentially) a value.
@@ -251,15 +260,13 @@ public:
     uint64_t storedKind : 2;
 
     /// \brief Encode a path element kind and a value into the storage format.
-    static KindAndValueStorage encodeStorage(PathElementKind kind,
-                                             unsigned value) {
-      unsigned result = (value << 8) | (unsigned)kind;
-      return result;
+    static uint64_t encodeStorage(PathElementKind kind, unsigned value) {
+      return ((uint64_t)value << 8) | kind;
     }
 
     /// \brief Decode a storage value into path element kind and value.
     static std::pair<PathElementKind, unsigned>
-    decodeStorage(KindAndValueStorage storage) {
+    decodeStorage(uint64_t storage) {
       return { (PathElementKind)((unsigned)storage & 0xFF), storage >> 8 };
     }
 
@@ -299,15 +306,17 @@ public:
 
     PathElement(PathElementKind kind, ValueDecl *decl)
       : storage((reinterpret_cast<uintptr_t>(decl) >> 2)),
-        storedKind(StoredWitness)
+        storedKind(kind == Witness ? StoredWitness : StoredRequirement)
     {
-      assert(kind == Witness && "Not a witness element");
-      assert(getWitness() == decl);
+      assert((kind == Witness || kind == Requirement) &&
+             "Not a witness element");
+      assert(((kind == Requirement && getRequirement() == decl) ||
+              (kind == Witness && getWitness() == decl)));
     }
 
     PathElement(AssociatedTypeDecl *decl)
       : storage((reinterpret_cast<uintptr_t>(decl) >> 2)),
-        storedKind(StoredAssociatedType)
+        storedKind(StoredRequirement)
     {
       assert(getAssociatedType() == decl);
     }
@@ -335,11 +344,19 @@ public:
     static PathElement getGenericArgument(unsigned position) {
       return PathElement(GenericArgument, position);
     }
+    
+    /// Get a path element for a key path component.
+    static PathElement getKeyPathComponent(unsigned position) {
+      return PathElement(KeyPathComponent, position);
+    }
 
-    /// \brief Retrieve a path element for an argument to string
-    /// interpolation.
-    static PathElement getInterpolationArgument(unsigned position) {
-      return PathElement(InterpolationArgument, position);
+    /// Get a path element for a conditional requirement.
+    static PathElement getConditionalRequirementComponent(unsigned index) {
+      return PathElement(ConditionalRequirement, index);
+    }
+
+    static PathElement getTypeRequirementComponent(unsigned index) {
+      return PathElement(TypeParameterRequirement, index);
     }
 
     /// \brief Retrieve the kind of path element.
@@ -348,8 +365,9 @@ public:
       case StoredArchetype:
         return Archetype;
 
-      case StoredAssociatedType:
-        return AssociatedType;
+      case StoredRequirement:
+        return isa<AssociatedTypeDecl>(getRequirement()) ? AssociatedType
+                                                         : Requirement;
 
       case StoredWitness:
         return Witness;
@@ -357,6 +375,8 @@ public:
       case StoredKindAndValue:
         return decodeStorage(storage).first;
       }
+
+      llvm_unreachable("Unhandled StoredKind in switch.");
     }
 
     /// \brief Retrieve the value associated with this path element,
@@ -396,7 +416,14 @@ public:
       return reinterpret_cast<ArchetypeType *>(storage << 2);
     }
 
-      /// Retrieve the declaration for an associated type path element.
+    /// Retrieve the declaration for a requirement path element.
+    ValueDecl *getRequirement() const {
+      assert((static_cast<StoredKind>(storedKind) == StoredRequirement) &&
+             "Is not a requirement");
+      return reinterpret_cast<ValueDecl *>(storage << 2);
+    }
+
+    /// Retrieve the declaration for an associated type path element.
     AssociatedTypeDecl *getAssociatedType() const {
       assert(getKind() == AssociatedType && "Is not an associated type");
       return reinterpret_cast<AssociatedTypeDecl *>(storage << 2);
@@ -427,12 +454,6 @@ public:
   }
 
   unsigned getSummaryFlags() const { return summaryFlags; }
-
-  /// \brief Determines whether this locator has a "simple" path, without
-  /// any transformations that break apart types.
-  bool hasSimplePath() const {
-    return !(getSummaryFlags() & IsNotSimple);
-  }
 
   /// \brief Determines whether this locator is part of a function
   /// conversion.
@@ -596,8 +617,28 @@ public:
 
   /// Attempt to simplify this locator to a single expression.
   Expr *trySimplifyToExpr() const;
+
+  /// Retrieve the last element in the path, if there is one.
+  Optional<LocatorPathElt> last() const {
+    // If we stored a path element here, grab it.
+    if (element) return *element;
+
+    // Otherwise, look in the previous builder if there is one.
+    if (auto prevBuilder = previous.dyn_cast<ConstraintLocatorBuilder *>())
+      return prevBuilder->last();
+
+    // Next, check the constraint locator itself.
+    if (auto locator = previous.dyn_cast<ConstraintLocator *>()) {
+      auto path = locator->getPath();
+      if (path.empty()) return None;
+      return path.back();
+    }
+
+    return None;
+  }
 };
 
-} } // end namespace swift::constraints
+} // end namespace constraints
+} // end namespace swift
 
 #endif // LLVM_SWIFT_SEMA_CONSTRAINTLOCATOR_H

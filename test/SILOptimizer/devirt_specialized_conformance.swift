@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -O %s -emit-sil -sil-verify-all | FileCheck %s
+// RUN: %target-swift-frontend -O -Xllvm -sil-inline-generics=false -Xllvm -sil-disable-pass=GlobalOpt %s -emit-sil -sil-verify-all | %FileCheck %s
 
 // Make sure that we completely inline/devirtualize/substitute all the way down
 // to unknown1.
@@ -17,21 +17,21 @@ struct Int32 {}
 func unknown1() -> ()
 
 protocol P {
-  func doSomething(x : Int32)
+  func doSomething(_ x : Int32)
 }
 
 struct X {}
 
 class B<T> : P {
-  func doSomething(x : Int32) {
+  func doSomething(_ x : Int32) {
      unknown1()
    }
  }
 
-func doSomething(p : P, _ x : Int32) {
+func doSomething(_ p : P, _ x : Int32) {
   p.doSomething(x)
 }
-func doSomething2<T : P>(t : T, _ x : Int32) {
+func doSomething2<T : P>(_ t : T, _ x : Int32) {
   t.doSomething(x)
 }
 

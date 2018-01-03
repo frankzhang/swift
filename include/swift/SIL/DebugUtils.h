@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,7 +26,7 @@
 // some utility functions, which can be used instead of the relevant member
 // functions in ValueBase and SILValue:
 //
-// V->use_empty()        ->  hasNoUsesExceptDebug(V)
+// V->use_empty()        ->  onlyHaveDebugUses(V)
 // V.hasOneUse()         ->  hasOneNonDebugUse(V)
 // V.getUses()           ->  getNonDebugUses(V)
 // I->eraseFromParent()  ->  eraseFromParentWithDebugInsts(I)
@@ -36,7 +36,8 @@
 #ifndef SWIFT_SIL_DEBUGUTILS_H
 #define SWIFT_SIL_DEBUGUTILS_H
 
-#include "swift/SIL/SILValue.h"
+#include "swift/SIL/SILBasicBlock.h"
+#include "swift/SIL/SILInstruction.h"
 
 namespace swift {
 
@@ -137,9 +138,19 @@ inline iterator_range<NonDUIterator> getNonDebugUses(SILValue V) {
 
 /// Returns true if a value (e.g. SILInstruction) has no uses except debug
 /// instructions.
-inline bool hasNoUsesExceptDebug(SILValue V) {
+inline bool onlyHaveDebugUses(SILValue V) {
   auto NonDebugUses = getNonDebugUses(V);
   return NonDebugUses.begin() == NonDebugUses.end();
+}
+
+/// Return true if all of the results of the given instruction have no uses
+/// except debug instructions.
+inline bool onlyHaveDebugUsesOfAllResults(SILInstruction *I) {
+  for (auto result : I->getResults()) {
+    if (!onlyHaveDebugUses(result))
+      return false;
+  }
+  return true;
 }
 
 /// Returns true if a value (e.g. SILInstruction) has exactly one use which is
@@ -168,16 +179,26 @@ inline SILInstruction *getSingleNonDebugUser(SILValue V) {
 /// incremented.
 inline void eraseFromParentWithDebugInsts(SILInstruction *I,
                                           SILBasicBlock::iterator &InstIter) {
-  while (!I->use_empty()) {
-    auto *User = I->use_begin()->getUser();
-    assert(isDebugInst(User));
-    if (InstIter != SILBasicBlock::iterator() &&
-        InstIter != I->getParent()->end() &&
-        &*InstIter == User) {
-      InstIter++;
+  auto results = I->getResults();
+
+  bool foundAny;
+  do {
+    foundAny = false;
+    for (auto result : results) {
+      while (!result->use_empty()) {
+        foundAny = true;
+        auto *User = result->use_begin()->getUser();
+        assert(isDebugInst(User));
+        if (InstIter != SILBasicBlock::iterator() &&
+            InstIter != I->getParent()->end() &&
+            &*InstIter == User) {
+          InstIter++;
+        }
+        User->eraseFromParent();
+      }
     }
-    User->eraseFromParent();
-  }
+  } while (foundAny);
+
   I->eraseFromParent();
 }
 

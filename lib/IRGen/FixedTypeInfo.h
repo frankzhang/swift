@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -76,20 +76,17 @@ public:
     return (isFixedSize(expansion) && StorageSize.isZero());
   }
 
-  ContainedAddress allocateStack(IRGenFunction &IGF, SILType T,
-                                 const llvm::Twine &name) const override;
-  void deallocateStack(IRGenFunction &IGF, Address addr, SILType T) const override;
-  void destroyStack(IRGenFunction &IGF, Address addr, SILType T) const override;
+  StackAddress allocateStack(IRGenFunction &IGF, SILType T,
+                             const llvm::Twine &name) const override;
+  void deallocateStack(IRGenFunction &IGF, StackAddress addr, SILType T) const override;
+  void destroyStack(IRGenFunction &IGF, StackAddress addr, SILType T,
+                    bool isOutlined) const override;
 
   // We can give these reasonable default implementations.
 
-  void initializeWithTake(IRGenFunction &IGF, Address destAddr,
-                          Address srcAddr, SILType T) const override;
+  void initializeWithTake(IRGenFunction &IGF, Address destAddr, Address srcAddr,
+                          SILType T, bool isOutlined) const override;
 
-  std::pair<llvm::Value*, llvm::Value*>
-  getSizeAndAlignmentMask(IRGenFunction &IGF, SILType T) const override;
-  std::tuple<llvm::Value*,llvm::Value*,llvm::Value*>
-  getSizeAndAlignmentMaskAndStride(IRGenFunction &IGF, SILType T) const override;
   llvm::Value *getSize(IRGenFunction &IGF, SILType T) const override;
   llvm::Value *getAlignmentMask(IRGenFunction &IGF, SILType T) const override;
   llvm::Value *getStride(IRGenFunction &IGF, SILType T) const override;
@@ -120,8 +117,13 @@ public:
   /// object.  The stride is the storage size rounded up to the
   /// alignment; its practical use is that, in an array, it is the
   /// offset from the size of one element to the offset of the next.
+  /// The stride is at least one, even for zero-sized types, like the empty
+  /// tuple.
   Size getFixedStride() const {
-    return StorageSize.roundUpToAlignment(getFixedAlignment());
+    Size s = StorageSize.roundUpToAlignment(getFixedAlignment());
+    if (s.isZero())
+      s = Size(1);
+    return s;
   }
   
   /// Returns the fixed number of "extra inhabitants" (that is, bit
@@ -224,9 +226,25 @@ public:
   /// Fixed-size types never need dynamic value witness table instantiation.
   void initializeMetadata(IRGenFunction &IGF,
                           llvm::Value *metadata,
-                          llvm::Value *vwtable,
+                          bool isVWTMutable,
                           SILType T) const override {}
-  
+
+  void collectArchetypeMetadata(
+      IRGenFunction &IGF,
+      llvm::MapVector<CanType, llvm::Value *> &typeToMetadataVec,
+      SILType T) const override {
+    return;
+  }
+
+  llvm::Value *getEnumTagSinglePayload(IRGenFunction &IGF,
+                                       llvm::Value *numEmptyCases,
+                                       Address enumAddr,
+                                       SILType T) const override;
+
+  void storeEnumTagSinglePayload(IRGenFunction &IGF, llvm::Value *whichCase,
+                                 llvm::Value *numEmptyCases, Address enumAddr,
+                                 SILType T) const override;
+
   static bool classof(const FixedTypeInfo *type) { return true; }
   static bool classof(const TypeInfo *type) { return type->isFixedSize(); }
 };

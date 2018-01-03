@@ -1,26 +1,9 @@
-// RUN: rm -rf %t && mkdir -p %t/before && mkdir -p %t/after
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/enum_add_cases.swift -o %t/before/enum_add_cases.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/enum_add_cases.swift -o %t/before/enum_add_cases.o
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/enum_add_cases.swift -o %t/after/enum_add_cases.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/enum_add_cases.swift -o %t/after/enum_add_cases.o
-
-// RUN: %target-build-swift -D BEFORE -c %s -I %t/before -o %t/before/main.o
-// RUN: %target-build-swift -D AFTER -c %s -I %t/after -o %t/after/main.o
-
-// RUN: %target-build-swift %t/before/enum_add_cases.o %t/before/main.o -o %t/before_before
-// RUN: %target-build-swift %t/before/enum_add_cases.o %t/after/main.o -o %t/before_after
-// RUN: %target-build-swift %t/after/enum_add_cases.o %t/before/main.o -o %t/after_before
-// RUN: %target-build-swift %t/after/enum_add_cases.o %t/after/main.o -o %t/after_after
-
-// RUN: %target-run %t/before_before
-// RUN: %target-run %t/before_after
-// RUN: %target-run %t/after_before
-// RUN: %target-run %t/after_after
+// RUN: %target-resilience-test
+// REQUIRES: executable_test
 
 import StdlibUnittest
 import enum_add_cases
+
 
 var EnumAddCasesTest = TestSuite("EnumAddCases")
 
@@ -28,7 +11,7 @@ func myAddNoPayloadToSingletonCases() -> [AddNoPayloadToSingleton] {
   return [.Noses]
 }
 
-func evaluateAddNoPayloadToSingletonCases(e: [AddNoPayloadToSingleton]) -> [Int] {
+func evaluateAddNoPayloadToSingletonCases(_ e: [AddNoPayloadToSingleton]) -> [Int] {
   return e.map {
     switch $0 {
     case .Noses:
@@ -57,7 +40,7 @@ func myAddPayloadToSingletonCases() -> [AddPayloadToSingleton] {
   return [.Cats]
 }
 
-func evaluateAddPayloadToSingletonCases(e: [AddPayloadToSingleton]) -> [Int] {
+func evaluateAddPayloadToSingletonCases(_ e: [AddPayloadToSingleton]) -> [Int] {
   return e.map {
     switch $0 {
     case .Cats:
@@ -88,12 +71,12 @@ EnumAddCasesTest.test("AddPayloadToSingleton") {
 
 ///////////////////////////////////////////////////////////////////////
 
-func myAddNoPayloadToSinglePayloadCases(s: Starfish)
+func myAddNoPayloadToSinglePayloadCases(_ s: Starfish)
     -> [AddNoPayloadToSinglePayload] {
   return [.Cats(s), .Noses]
 }
 
-func evaluateAddNoPayloadToSinglePayloadCases(s: Starfish,
+func evaluateAddNoPayloadToSinglePayloadCases(_ s: Starfish,
                                             _ e: [AddNoPayloadToSinglePayload])
     -> [Int] {
   return e.map {
@@ -127,12 +110,12 @@ EnumAddCasesTest.test("AddNoPayloadToSinglePayload") {
 
 ///////////////////////////////////////////////////////////////////////
 
-func myAddPayloadToSinglePayloadCases(s: Starfish)
+func myAddPayloadToSinglePayloadCases(_ s: Starfish)
     -> [AddPayloadToSinglePayload] {
   return [.Cats, .Paws(s)]
 }
 
-func evaluateAddPayloadToSinglePayloadCases(s: Starfish,
+func evaluateAddPayloadToSinglePayloadCases(_ s: Starfish,
                                             _ e: [AddPayloadToSinglePayload])
     -> [Int] {
   return e.map {
@@ -166,12 +149,12 @@ EnumAddCasesTest.test("AddPayloadToSinglePayload") {
 
 ///////////////////////////////////////////////////////////////////////
 
-func myAddNoPayloadToMultiPayloadCases(s: Starfish)
+func myAddNoPayloadToMultiPayloadCases(_ s: Starfish)
     -> [AddNoPayloadToMultiPayload] {
   return [.Cats(s), .Puppies(s)]
 }
 
-func evaluateAddNoPayloadToMultiPayloadCases(s: Starfish,
+func evaluateAddNoPayloadToMultiPayloadCases(_ s: Starfish,
                                             _ e: [AddNoPayloadToMultiPayload])
     -> [Int] {
   return e.map {
@@ -206,12 +189,12 @@ EnumAddCasesTest.test("AddNoPayloadToMultiPayload") {
 
 ///////////////////////////////////////////////////////////////////////
 
-func myAddPayloadToMultiPayloadCases(s: Starfish)
+func myAddPayloadToMultiPayloadCases(_ s: Starfish)
     -> [AddPayloadToMultiPayload] {
   return [.Cats(s), .Ponies(s), .Pandas]
 }
 
-func evaluateAddPayloadToMultiPayloadCases(s: Starfish,
+func evaluateAddPayloadToMultiPayloadCases(_ s: Starfish,
                                             _ e: [AddPayloadToMultiPayload])
     -> [Int] {
   return e.map {

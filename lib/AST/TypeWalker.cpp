@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -36,6 +36,7 @@ class Traversal : public TypeVisitor<Traversal, bool>
   bool visitUnresolvedType(UnresolvedType *ty) { return false; }
   bool visitBuiltinType(BuiltinType *ty) { return false; }
   bool visitNameAliasType(NameAliasType *ty) { return false; }
+  bool visitSILTokenType(SILTokenType *ty) { return false; }
 
   bool visitParenType(ParenType *ty) {
     return doIt(ty->getUnderlyingType());
@@ -68,20 +69,16 @@ class Traversal : public TypeVisitor<Traversal, bool>
   }
   bool visitSubstitutableType(SubstitutableType *ty) { return false; }
 
-  bool visitSubstitutedType(SubstitutedType *ty) {
-    if (Walker.shouldVisitOriginalSubstitutedType())
-      if (doIt(ty->getOriginal()))
-        return true;
-    return doIt(ty->getReplacementType());
-  }
-
   bool visitDependentMemberType(DependentMemberType *ty) {
     return doIt(ty->getBase());
   }
 
   bool visitAnyFunctionType(AnyFunctionType *ty) {
-    if (doIt(ty->getInput()))
-      return true;
+    for (const auto &param : ty->getParams()) {
+      if (doIt(param.getType()))
+        return true;
+    }
+
     return doIt(ty->getResult());
   }
 
@@ -101,8 +98,7 @@ class Traversal : public TypeVisitor<Traversal, bool>
         if (doIt(req.getSecondType()))
           return true;
         break;
-
-      case RequirementKind::WitnessMarker:
+      case RequirementKind::Layout:
         break;
       }
     }
@@ -114,10 +110,16 @@ class Traversal : public TypeVisitor<Traversal, bool>
     for (auto param : ty->getParameters())
       if (doIt(param.getType()))
         return true;
-    return doIt(ty->getResult().getType());
+    for (auto result : ty->getResults())
+      if (doIt(result.getType()))
+        return true;
+    if (ty->hasErrorResult())
+      if (doIt(ty->getErrorResult().getType()))
+        return true;
+    return false;
   }
 
-  bool visitSyntaxSugarType(SyntaxSugarType *ty) {
+  bool visitUnarySyntaxSugarType(UnarySyntaxSugarType *ty) {
     return doIt(ty->getBaseType());
   }
 
@@ -126,8 +128,8 @@ class Traversal : public TypeVisitor<Traversal, bool>
   }
 
   bool visitProtocolCompositionType(ProtocolCompositionType *ty) {
-    for (auto proto : ty->getProtocols())
-      if (doIt(proto))
+    for (auto member : ty->getMembers())
+      if (doIt(member))
         return true;
     return false;
   }
@@ -161,14 +163,14 @@ class Traversal : public TypeVisitor<Traversal, bool>
   bool visitTypeVariableType(TypeVariableType *ty) { return false; }
   
   bool visitSILBlockStorageType(SILBlockStorageType *ty) {
-    if (doIt(ty->getCaptureType()))
-      return true;
-    return false;
+    return doIt(ty->getCaptureType());
   }
 
   bool visitSILBoxType(SILBoxType *ty) {
-    if (doIt(ty->getBoxedType()))
-      return true;
+    for (auto &arg : ty->getGenericArgs()) {
+      if (doIt(arg.getReplacement()))
+        return true;
+    }
     return false;
   }
 
@@ -205,7 +207,7 @@ public:
   }
 };
 
-} // end anonymous namespace.
+} // end anonymous namespace
 
 bool Type::walk(TypeWalker &walker) const {
   return Traversal(walker).doIt(*this);

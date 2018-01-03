@@ -46,10 +46,13 @@ typedef long NSInteger;
 + (void) runce;
 - (void) funge;
 - (void) foo;
-- (void*) getBytes NS_RETURNS_INNER_POINTER;
+- (void* _Nonnull) getBytes NS_RETURNS_INNER_POINTER;
 
-@property void *innerProperty;
-- (void*) innerProperty NS_RETURNS_INNER_POINTER;
+- (void)doTheThingWithOptions:(nonnull NSDictionary *)options;
+- (void)doTheOtherThingWithOptionalOptions:(nullable NSDictionary *)options;
+
+@property (nonnull) void *innerProperty;
+- (void* _Nonnull) innerProperty NS_RETURNS_INNER_POINTER;
 - (void) setInnerProperty: (void*)p;
 
 @property void (^block)(void);
@@ -58,10 +61,7 @@ typedef long NSInteger;
 + (instancetype)gizmoWithStuff:(NSInteger)x;
 + (Gizmo*)gizmoWithExactlyStuff:(NSInteger)x;
 
-- (Gizmo*)nonNilGizmo;
-+ (Gizmo*)nonNilGizmo;
-@property Gizmo* nonNilGizmoProperty;
-@property (unsafe_unretained) Gizmo* unownedNonNilGizmoProperty;
+@property id originalName __attribute__((swift_name("renamedProp")));
 @end
 
 @interface Guisemeau : Gizmo
@@ -96,7 +96,7 @@ struct NSRect NSMakeRect(double, double, double, double);
 struct NSRect NSInsetRect(struct NSRect, double, double);
 NSString *NSStringFromRect(struct NSRect r);
 
-typedef  NS_ENUM(NSInteger, NSRuncingOptions) {
+typedef NS_ENUM(NSInteger, NSRuncingOptions) {
   NSRuncingMince = 123,
   NSRuncingQuinceSliced = 4567,
   NSRuncingQuinceJulienned = 5678,

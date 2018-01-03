@@ -1,23 +1,23 @@
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST1
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST2
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST3
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST4
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST5
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST6
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST7
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST8
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST9
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST10
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST11
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST12
-// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | FileCheck %s --check-prefix=TEST13
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST1
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST2
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST3
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST4
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST5
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST6
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST7
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST8
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST9
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST10
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST11
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST12
+// RUN: %target-swift-frontend -O -emit-sil -Xllvm -debug-only=cowarray-opts -primary-file %s 2>&1 | %FileCheck %s --check-prefix=TEST13
 // REQUIRES: asserts,swift_stdlib_no_asserts,optimized_stdlib
 
 // TEST1-LABEL: COW Array Opts in Func {{.*}}inoutarr{{.*}}
 // TEST1: Hoisting make_mutable
 // TEST1: COW Array Opts
 
-func inoutarr(inout a: [Int]) {
+func inoutarr(a: inout [Int]) {
   for i in 0..<a.count {
     a[i] = 0
   }
@@ -30,14 +30,14 @@ struct S {
 // TEST2-LABEL: COW Array Opts in Func {{.*}}arrelt{{.*}}
 // TEST2: Hoisting make_mutable
 // TEST2: COW Array Opts
-func arrelt(inout s: S) {
+func arrelt(s: inout S) {
   for i in 0..<s.a.count {
     s.a[i] = 0
   }
 }
 
 
-class ArrayInClass {
+class Array_in_class {
   final var A : [Int]
   final var B : [Int]
   final var C : [[Int]]
@@ -93,7 +93,7 @@ struct Array2d {
 // TEST6:        Hoisting make_mutable
 // TEST6:   COW Array Opts in
 
-func test2DArrayLoop(inout A : Array2d) {
+func test2DArrayLoop(A: inout Array2d) {
   for r in 0 ..< A.rows {
     for c in 0 ..< A.cols {
       A.A[r*A.cols+c] += 1
@@ -106,7 +106,7 @@ class AClass {}
 // TEST7-LABEL: COW Array Opts in Func {{.*}}hoistArrayOfClasses{{.*}}
 // TEST7: Hoisting make_mutable
 // TEST7: COW Array Opts
-func hoistArrayOfClasses(inout A : [AClass], x: AClass) {
+func hoistArrayOfClasses(A: inout [AClass], x: AClass) {
   for i in 0 ..< A.count {
     A[i] = x
   }
@@ -116,14 +116,14 @@ func hoistArrayOfClasses(inout A : [AClass], x: AClass) {
 // TEST8: Hoisting make_mutable
 // TEST8: COW Array Opts
 
-func hoistMutableOfAppend(inout A : [Int]) {
+func hoistMutableOfAppend(A: inout [Int]) {
   for i in 0 ..< 10 {
     A.append(i)
   }
 }
 
 @inline(never)
-func use(a: [Int]) {
+func use(_ a: [Int]) {
 }
 
 class ArrayHolder {
@@ -189,7 +189,7 @@ class ArrayHolder {
 // TEST13: Hoisting make_mutable
 // TEST13: COW Array Opts
 
-func hoist2DArray(inout a: [[Int]]) {
+func hoist2DArray(a: inout [[Int]]) {
   for i in 0 ..< a.count {
     for y in 0 ..< a[i].count {
       a[i][y] = a[i][y] * 2

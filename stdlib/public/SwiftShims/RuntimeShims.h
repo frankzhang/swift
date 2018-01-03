@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,42 +20,40 @@
 
 #include "SwiftStddef.h"
 #include "SwiftStdint.h"
+#include "Visibility.h"
 
 #ifdef __cplusplus
 namespace swift { extern "C" {
-#else
-#define bool _Bool
 #endif
 
-bool swift_objc_class_usesNativeSwiftReferenceCounting(const void *);
-
 /// Return an NSString to be used as the Mirror summary of the object
+SWIFT_RUNTIME_STDLIB_INTERFACE
 void *_swift_objCMirrorSummary(const void * nsObject);
 
 /// Call strtold_l with the C locale, swapping argument and return
 /// types so we can operate on Float80.  Return NULL on overflow.
+SWIFT_RUNTIME_STDLIB_INTERFACE
 const char *_swift_stdlib_strtold_clocale(const char *nptr, void *outResult);
 /// Call strtod_l with the C locale, swapping argument and return
 /// types so we can operate consistently on Float80.  Return NULL on
 /// overflow.
+SWIFT_RUNTIME_STDLIB_INTERFACE
 const char *_swift_stdlib_strtod_clocale(const char *nptr, double *outResult);
 /// Call strtof_l with the C locale, swapping argument and return
 /// types so we can operate consistently on Float80.  Return NULL on
 /// overflow.
+SWIFT_RUNTIME_STDLIB_INTERFACE
 const char *_swift_stdlib_strtof_clocale(const char *nptr, float *outResult);
 
-struct Metadata;
-  
-/// Return the superclass, if any.  The result is nullptr for root
-/// classes and class protocol types.
-const struct Metadata *swift_class_getSuperclass(
-  const struct Metadata *);
-  
+SWIFT_RUNTIME_STDLIB_INTERFACE
 void _swift_stdlib_flockfile_stdout(void);
+SWIFT_RUNTIME_STDLIB_INTERFACE
 void _swift_stdlib_funlockfile_stdout(void);
 
+SWIFT_RUNTIME_STDLIB_INTERFACE
 int _swift_stdlib_putc_stderr(int C);
 
+SWIFT_RUNTIME_STDLIB_INTERFACE
 __swift_size_t _swift_stdlib_getHardwareConcurrency();
 
 #ifdef __cplusplus

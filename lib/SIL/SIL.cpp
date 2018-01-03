@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,24 +19,14 @@
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/AnyFunctionRef.h"
 #include "swift/AST/Decl.h"
-#include "swift/AST/Expr.h"
-#include "swift/AST/Mangle.h"
 #include "swift/AST/Pattern.h"
+#include "swift/AST/ProtocolConformance.h"
 #include "swift/ClangImporter/ClangModule.h"
-#include "swift/Basic/Fallthrough.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
+
 using namespace swift;
-
-void ValueBase::replaceAllUsesWith(ValueBase *RHS) {
-  assert(this != RHS && "Cannot RAUW a value with itself");
-  while (!use_empty()) {
-    Operand *Op = *use_begin();
-    Op->set(RHS);
-  }
-}
-
 
 SILUndef *SILUndef::get(SILType Ty, SILModule *M) {
   // Unique these.
@@ -54,44 +44,25 @@ FormalLinkage swift::getDeclLinkage(const ValueDecl *D) {
   if (isa<ClangModuleUnit>(fileContext))
     return FormalLinkage::PublicNonUnique;
 
-  if (!D->hasAccessibility()) {
+  if (!D->hasAccess()) {
     assert(D->getDeclContext()->isLocalContext());
     return FormalLinkage::Private;
   }
 
   switch (D->getEffectiveAccess()) {
-  case Accessibility::Public:
+  case AccessLevel::Public:
+  case AccessLevel::Open:
     return FormalLinkage::PublicUnique;
-  case Accessibility::Internal:
-    // FIXME: This ought to be "hidden" as well, but that causes problems when
-    // inlining code from the standard library, which may reference internal
-    // declarations.
-    return FormalLinkage::PublicUnique;
-  case Accessibility::Private:
+  case AccessLevel::Internal:
+    return FormalLinkage::HiddenUnique;
+  case AccessLevel::FilePrivate:
+  case AccessLevel::Private:
     // Why "hidden" instead of "private"? Because the debugger may need to
     // access these symbols.
     return FormalLinkage::HiddenUnique;
   }
-}
 
-FormalLinkage swift::getTypeLinkage(CanType type) {
-  FormalLinkage result = FormalLinkage::Top;
-
-  // Merge all nominal types from the structural type.
-  (void) type.findIf([&](Type _type) {
-    CanType type = CanType(_type);
-
-    // For any nominal type reference, look at the type declaration.
-    if (auto nominal = type->getAnyNominal())
-      result ^= getDeclLinkage(nominal);
-
-    assert(!isa<PolymorphicFunctionType>(type) &&
-           "Don't expect a polymorphic function type here");
-
-    return false; // continue searching
-  });
-
-  return result;
+  llvm_unreachable("Unhandled access level in switch.");
 }
 
 SILLinkage swift::getSILLinkage(FormalLinkage linkage,
@@ -115,4 +86,32 @@ SILLinkage swift::getSILLinkage(FormalLinkage linkage,
     return SILLinkage::Private;
   }
   llvm_unreachable("bad formal linkage");
+}
+
+SILLinkage
+swift::getLinkageForProtocolConformance(const NormalProtocolConformance *C,
+                                        ForDefinition_t definition) {
+  // Behavior conformances are always private.
+  if (C->isBehaviorConformance())
+    return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
+
+  // If the conformance was synthesized by the ClangImporter, give it
+  // shared linkage.
+  if (isa<ClangModuleUnit>(C->getDeclContext()->getModuleScopeContext()))
+    return SILLinkage::Shared;
+
+  auto typeDecl = C->getType()->getNominalOrBoundGenericNominal();
+  AccessLevel access = std::min(C->getProtocol()->getEffectiveAccess(),
+                                typeDecl->getEffectiveAccess());
+  switch (access) {
+    case AccessLevel::Private:
+    case AccessLevel::FilePrivate:
+      return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
+
+    case AccessLevel::Internal:
+      return (definition ? SILLinkage::Hidden : SILLinkage::HiddenExternal);
+
+    default:
+      return (definition ? SILLinkage::Public : SILLinkage::PublicExternal);
+  }
 }

@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,6 +23,7 @@
 #include "swift/SIL/SILInstruction.h"
 #include "swift/SIL/TypeSubstCloner.h"
 #include "swift/SILOptimizer/Utils/Local.h"
+#include "swift/SILOptimizer/Utils/Generics.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include <functional>
@@ -30,31 +31,36 @@
 namespace swift {
 
 class GenericCloner : public TypeSubstCloner<GenericCloner> {
+  IsSerialized_t Serialized;
+  const ReabstractionInfo &ReInfo;
   CloneCollector::CallbackType Callback;
 
 public:
   friend class SILCloner<GenericCloner>;
 
   GenericCloner(SILFunction *F,
-                TypeSubstitutionMap &InterfaceSubs,
-                TypeSubstitutionMap &ContextSubs,
+                IsSerialized_t Serialized,
+                const ReabstractionInfo &ReInfo,
+                SubstitutionList ParamSubs,
                 StringRef NewName,
-                ArrayRef<Substitution> ApplySubs,
                 CloneCollector::CallbackType Callback)
-  : TypeSubstCloner(*initCloned(F, InterfaceSubs, NewName), *F, ContextSubs,
-                    ApplySubs), Callback(Callback) {
-    assert(F->getDebugScope()->SILFn != getCloned()->getDebugScope()->SILFn);
+  : TypeSubstCloner(*initCloned(F, Serialized, ReInfo, NewName), *F,
+                    ParamSubs), ReInfo(ReInfo), Callback(Callback) {
+    assert(F->getDebugScope()->Parent != getCloned()->getDebugScope()->Parent);
   }
   /// Clone and remap the types in \p F according to the substitution
-  /// list in \p Subs.
-  static SILFunction *cloneFunction(SILFunction *F,
-                                    TypeSubstitutionMap &InterfaceSubs,
-                                    TypeSubstitutionMap &ContextSubs,
-                                    StringRef NewName, ApplySite Caller,
-                            CloneCollector::CallbackType Callback =nullptr) {
+  /// list in \p Subs. Parameters are re-abstracted (changed from indirect to
+  /// direct) according to \p ReInfo.
+  static SILFunction *
+  cloneFunction(SILFunction *F,
+                IsSerialized_t Serialized,
+                const ReabstractionInfo &ReInfo,
+                SubstitutionList ParamSubs,
+                StringRef NewName,
+                CloneCollector::CallbackType Callback =nullptr) {
     // Clone and specialize the function.
-    GenericCloner SC(F, InterfaceSubs, ContextSubs, NewName,
-                     Caller.getSubstitutions(), Callback);
+    GenericCloner SC(F, Serialized, ReInfo, ParamSubs,
+                     NewName, Callback);
     SC.populateCloned();
     SC.cleanUp(SC.getCloned());
     return SC.getCloned();
@@ -77,7 +83,8 @@ protected:
 
 private:
   static SILFunction *initCloned(SILFunction *Orig,
-                                 TypeSubstitutionMap &InterfaceSubs,
+                                 IsSerialized_t Serialized,
+                                 const ReabstractionInfo &ReInfo,
                                  StringRef NewName);
   /// Clone the body of the function into the empty function that was created
   /// by initCloned.

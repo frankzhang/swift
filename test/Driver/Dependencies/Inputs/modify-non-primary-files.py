@@ -3,11 +3,11 @@
 #
 # This source file is part of the Swift.org open source project
 #
-# Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+# Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 # Licensed under Apache License v2.0 with Runtime Library Exception
 #
-# See http://swift.org/LICENSE.txt for license information
-# See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+# See https://swift.org/LICENSE.txt for license information
+# See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 #
 # ----------------------------------------------------------------------------
 #
@@ -24,19 +24,19 @@ import sys
 assert sys.argv[1] == '-frontend'
 
 if '-primary-file' in sys.argv:
-  primaryFileIndex = sys.argv.index('-primary-file') + 1
-  primaryFile = sys.argv[primaryFileIndex]
+    primaryFileIndex = sys.argv.index('-primary-file') + 1
+    primaryFile = sys.argv[primaryFileIndex]
 
-  # Modify all files after the primary file.
-  # Ideally this would modify every non-primary file, but that's harder to
-  # infer without actually parsing the arguments.
-  for file in sys.argv[primaryFileIndex + 1:]:
-    if file.startswith('-'):
-      break
-    os.utime(file, None)
+    # Modify all files after the primary file.
+    # Ideally this would modify every non-primary file, but that's harder to
+    # infer without actually parsing the arguments.
+    for file in sys.argv[primaryFileIndex + 1:]:
+        if file.startswith('-'):
+            break
+        os.utime(file, None)
 
 else:
-  primaryFile = None
+    primaryFile = None
 
 outputFile = sys.argv[sys.argv.index('-o') + 1]
 
@@ -46,6 +46,6 @@ with open(outputFile, 'a'):
     os.utime(outputFile, None)
 
 if primaryFile:
-  print("Handled", os.path.basename(primaryFile))
+    print("Handled", os.path.basename(primaryFile))
 else:
-  print("Produced", os.path.basename(outputFile))
+    print("Produced", os.path.basename(outputFile))

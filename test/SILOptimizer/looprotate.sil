@@ -1,4 +1,4 @@
-// RUN: %target-sil-opt -enable-sil-verify-all -loop-rotate %s | FileCheck %s
+// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -loop-rotate %s | %FileCheck %s
 
 sil_stage canonical
 
@@ -21,15 +21,22 @@ import Swift
 // CHECK:   [[STRUCT:%.*]] = struct $Int32 ({{%.*}} : $Builtin.Int32)
 // CHECK:   return [[STRUCT]] : $Int32
 
+protocol P {
+  func boo() -> Int64
+}
+
 class Bar {
+  func boo() -> Int64
   func foo()
   @objc func foo_objc()
 }
 
 sil @_TFC4main3Bar3foofS0_FT_T_ : $@convention(method) (@guaranteed Bar) -> ()
+sil @_TFC4main3Bar3boofS0_FT_T_ : $@convention(method) (@guaranteed Bar) -> Int64
 sil @_TFC4main3Bar3foo_objcfS0_FT_T_ : $@convention(objc_method) (Bar) -> ()
 
 sil_vtable Bar {
+  #Bar.boo!1: _TFC4main3Bar3boofS0_FT_T_
   #Bar.foo!1: _TFC4main3Bar3foofS0_FT_T_
   #Bar.foo_objc!1: _TFC4main3Bar3foofS0_FT_T_
 }
@@ -38,12 +45,12 @@ sil @looprotate : $@convention(thin) (Int32, @owned Bar) -> Int32 {
 bb0(%0 : $Int32, %25: $Bar):
   %1 = struct_extract %0 : $Int32, #Int32._value
   %2 = integer_literal $Builtin.Int32, 0
-  %30 = alloc_box $Bool
-  %30a = project_box %30 : $@box Bool
-  br bb1(%1 : $Builtin.Int32, %2 : $Builtin.Int32, %25: $Bar, %30 : $@box Bool, %30a : $*Bool)
+  %30 = alloc_box $<τ_0_0> { var τ_0_0 } <Bool>
+  %30a = project_box %30 : $<τ_0_0> { var τ_0_0 } <Bool>, 0
+  br bb1(%1 : $Builtin.Int32, %2 : $Builtin.Int32, %25: $Bar, %30 : $<τ_0_0> { var τ_0_0 } <Bool>, %30a : $*Bool)
 
-bb1(%4 : $Builtin.Int32, %5 : $Builtin.Int32, %26: $Bar, %31 : $@box Bool, %32 : $*Bool):
-  %24 = class_method %26 : $Bar, #Bar.foo!1 : Bar -> () -> () , $@convention(method) (@guaranteed Bar) -> () // user: %6
+bb1(%4 : $Builtin.Int32, %5 : $Builtin.Int32, %26: $Bar, %31 : $<τ_0_0> { var τ_0_0 } <Bool>, %32 : $*Bool):
+  %24 = class_method %26 : $Bar, #Bar.foo!1 : (Bar) -> () -> (), $@convention(method) (@guaranteed Bar) -> () // user: %6
   %27 = apply %24(%25) : $@convention(method) (@guaranteed Bar) -> ()
   %6 = struct $Int32 (%5 : $Builtin.Int32)
   %8 = builtin "cmp_eq_Word"(%5 : $Builtin.Int32, %1 : $Builtin.Int32) : $Builtin.Int1
@@ -54,13 +61,13 @@ bb2:
   %12 = integer_literal $Builtin.Int1, -1
   %13 = builtin "sadd_with_overflow_Word"(%5 : $Builtin.Int32, %10 : $Builtin.Int32, %12 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)
   %14 = tuple_extract %13 : $(Builtin.Int32, Builtin.Int1), 0
-  %15 = enum $Optional<Int32>, #Optional.Some!enumelt.1, %6 : $Int32
-  %16 = unchecked_enum_data %15 : $Optional<Int32>, #Optional.Some!enumelt.1
+  %15 = enum $Optional<Int32>, #Optional.some!enumelt.1, %6 : $Int32
+  %16 = unchecked_enum_data %15 : $Optional<Int32>, #Optional.some!enumelt.1
   %17 = struct_extract %16 : $Int32, #Int32._value
   %19 = integer_literal $Builtin.Int1, -1
   %20 = builtin "sadd_with_overflow_Word"(%4 : $Builtin.Int32, %17 : $Builtin.Int32, %19 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)
   %21 = tuple_extract %20 : $(Builtin.Int32, Builtin.Int1), 0
-  br bb1(%21 : $Builtin.Int32, %14 : $Builtin.Int32, %26: $Bar, %31 : $@box Bool, %32 : $*Bool)
+  br bb1(%21 : $Builtin.Int32, %14 : $Builtin.Int32, %26: $Bar, %31 : $<τ_0_0> { var τ_0_0 } <Bool>, %32 : $*Bool)
 
 bb3:
   %23 = struct $Int32 (%4 : $Builtin.Int32)
@@ -91,8 +98,8 @@ bb2:
   %12 = integer_literal $Builtin.Int1, -1
   %13 = builtin "sadd_with_overflow_Word"(%5 : $Builtin.Int32, %10 : $Builtin.Int32, %12 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)
   %14 = tuple_extract %13 : $(Builtin.Int32, Builtin.Int1), 0
-  %15 = enum $Optional<Int32>, #Optional.Some!enumelt.1, %6 : $Int32
-  %16 = unchecked_enum_data %15 : $Optional<Int32>, #Optional.Some!enumelt.1
+  %15 = enum $Optional<Int32>, #Optional.some!enumelt.1, %6 : $Int32
+  %16 = unchecked_enum_data %15 : $Optional<Int32>, #Optional.some!enumelt.1
   %17 = struct_extract %16 : $Int32, #Int32._value
   %19 = integer_literal $Builtin.Int1, -1
   %20 = builtin "sadd_with_overflow_Word"(%4 : $Builtin.Int32, %17 : $Builtin.Int32, %19 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)
@@ -102,6 +109,45 @@ bb2:
 bb3 (%23 : $Builtin.Int32) :
   %24 = struct $Int32 (%23 : $Builtin.Int32)
   return %24 : $Int32
+}
+
+// The following function used to crash the compiler, because loop rotate
+// could not properly handle the reference from witness_method to the
+// archetype opened by open_existential_addr
+// CHECK-LABEL: sil @looprotate_with_opened_archetype
+// CHECK: return
+sil @looprotate_with_opened_archetype : $@convention(thin) (Int32, @in P) -> Int32 {
+bb0(%0 : $Int32, %25: $*P):
+  %1 = struct_extract %0 : $Int32, #Int32._value
+  %2 = integer_literal $Builtin.Int32, 0
+  %30 = alloc_box $<τ_0_0> { var τ_0_0 } <Bool>
+  %30a = project_box %30 : $<τ_0_0> { var τ_0_0 } <Bool>, 0
+  %40 = open_existential_addr immutable_access %25 : $*P to $*@opened("C22498FA-CABF-11E5-B9A9-685B35C48C83") P
+  br bb1(%1 : $Builtin.Int32, %2 : $Builtin.Int32, %25: $*P, %30 : $<τ_0_0> { var τ_0_0 } <Bool>, %30a : $*Bool)
+
+bb1(%4 : $Builtin.Int32, %5 : $Builtin.Int32, %26: $*P, %31 : $<τ_0_0> { var τ_0_0 } <Bool>, %32 : $*Bool):
+  %111 = witness_method $@opened("C22498FA-CABF-11E5-B9A9-685B35C48C83") P, #P.boo!1, %40 : $*@opened("C22498FA-CABF-11E5-B9A9-685B35C48C83") P : $@convention(witness_method: P) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> Int64
+  %122 = apply %111<@opened("C22498FA-CABF-11E5-B9A9-685B35C48C83") P>(%40) : $@convention(witness_method: P) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> Int64
+  %6 = struct $Int32 (%5 : $Builtin.Int32)
+  %8 = builtin "cmp_eq_Word"(%5 : $Builtin.Int32, %1 : $Builtin.Int32) : $Builtin.Int1
+  cond_br %8, bb3, bb2
+
+bb2:
+  %10 = integer_literal $Builtin.Int32, 1
+  %12 = integer_literal $Builtin.Int1, -1
+  %13 = builtin "sadd_with_overflow_Word"(%5 : $Builtin.Int32, %10 : $Builtin.Int32, %12 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)
+  %14 = tuple_extract %13 : $(Builtin.Int32, Builtin.Int1), 0
+  %15 = enum $Optional<Int32>, #Optional.some!enumelt.1, %6 : $Int32
+  %16 = unchecked_enum_data %15 : $Optional<Int32>, #Optional.some!enumelt.1
+  %17 = struct_extract %16 : $Int32, #Int32._value
+  %19 = integer_literal $Builtin.Int1, -1
+  %20 = builtin "sadd_with_overflow_Word"(%4 : $Builtin.Int32, %17 : $Builtin.Int32, %19 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)
+  %21 = tuple_extract %20 : $(Builtin.Int32, Builtin.Int1), 0
+  br bb1(%21 : $Builtin.Int32, %14 : $Builtin.Int32, %26: $*P, %31 : $<τ_0_0> { var τ_0_0 } <Bool>, %32 : $*Bool)
+
+bb3:
+  %23 = struct $Int32 (%4 : $Builtin.Int32)
+  return %23 : $Int32
 }
 
 // Don't assert on this loop. bb2 is bb1 loop's new header after rotation but
@@ -131,14 +177,14 @@ bb4(%12 : $Builtin.Int32):                        // Preds: bb3 bb7
   cond_br %14, bb5, bb9                           // id: %15
 
 bb5:                                              // Preds: bb4
-  %16 = enum $Optional<Int32>, #Optional.None!enumelt // user: %17
+  %16 = enum $Optional<Int32>, #Optional.none!enumelt // user: %17
   br bb6(%12 : $Builtin.Int32, %16 : $Optional<Int32>) // id: %17
 
 bb6(%18 : $Builtin.Int32, %19 : $Optional<Int32>):   // Preds: bb5 bb9
-  switch_enum %19 : $Optional<Int32>, case #Optional.Some!enumelt.1: bb7, case #Optional.None!enumelt: bb8 // id: %20
+  switch_enum %19 : $Optional<Int32>, case #Optional.some!enumelt.1: bb7, case #Optional.none!enumelt: bb8 // id: %20
 
 bb7:                                              // Preds: bb6
-  %21 = unchecked_enum_data %19 : $Optional<Int32>, #Optional.Some!enumelt.1
+  %21 = unchecked_enum_data %19 : $Optional<Int32>, #Optional.some!enumelt.1
   br bb4(%18 : $Builtin.Int32)                     // id: %22
 
 bb8:                                              // Preds: bb6
@@ -152,7 +198,7 @@ bb9:                                              // Preds: bb4
   %29 = tuple_extract %28 : $(Builtin.Int32, Builtin.Int1), 0 // user: %33
   %30 = tuple_extract %28 : $(Builtin.Int32, Builtin.Int1), 1 // user: %31
   cond_fail %30 : $Builtin.Int1                   // id: %31
-  %32 = enum $Optional<Int32>, #Optional.Some!enumelt.1, %24 : $Int32 // user: %33
+  %32 = enum $Optional<Int32>, #Optional.some!enumelt.1, %24 : $Int32 // user: %33
   br bb6(%29 : $Builtin.Int32, %32 : $Optional<Int32>) // id: %33
 
 bb10:                                             // Preds: bb1
@@ -178,7 +224,7 @@ bb0(%0 : $Int32, %25: $Bar):
   br bb1(%1 : $Builtin.Int32, %2 : $Builtin.Int32, %25: $Bar)
 
 bb1(%4 : $Builtin.Int32, %5 : $Builtin.Int32, %26: $Bar):
-  %101 = class_method [volatile] %100 : $Bar, #Bar.foo!1.foreign : Bar -> () -> () , $@convention(objc_method) (Bar) -> ()
+  %101 = objc_method %100 : $Bar, #Bar.foo!1.foreign : (Bar) -> () -> (), $@convention(objc_method) (Bar) -> ()
   %6 = struct $Int32 (%5 : $Builtin.Int32)
   %8 = builtin "cmp_eq_Word"(%5 : $Builtin.Int32, %1 : $Builtin.Int32) : $Builtin.Int1
   cond_br %8, bb3, bb2
@@ -189,8 +235,8 @@ bb2:
   %12 = integer_literal $Builtin.Int1, -1
   %13 = builtin "sadd_with_overflow_Word"(%5 : $Builtin.Int32, %10 : $Builtin.Int32, %12 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)
   %14 = tuple_extract %13 : $(Builtin.Int32, Builtin.Int1), 0
-  %15 = enum $Optional<Int32>, #Optional.Some!enumelt.1, %6 : $Int32
-  %16 = unchecked_enum_data %15 : $Optional<Int32>, #Optional.Some!enumelt.1
+  %15 = enum $Optional<Int32>, #Optional.some!enumelt.1, %6 : $Int32
+  %16 = unchecked_enum_data %15 : $Optional<Int32>, #Optional.some!enumelt.1
   %17 = struct_extract %16 : $Int32, #Int32._value
   %19 = integer_literal $Builtin.Int1, -1
   %20 = builtin "sadd_with_overflow_Word"(%4 : $Builtin.Int32, %17 : $Builtin.Int32, %19 : $Builtin.Int1) : $(Builtin.Int32, Builtin.Int1)

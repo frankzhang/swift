@@ -1,24 +1,29 @@
-// RUN: rm -rf %t && mkdir %t
+// RUN: %empty-directory(%t)
 
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -c %S/../Inputs/resilient_struct.swift -o %t/resilient_struct.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -c %S/../Inputs/resilient_struct.swift -o %t/resilient_struct.o
+// RUN: %target-build-swift-dylib(%t/libresilient_struct.%target-dylib-extension) -Xfrontend -enable-resilience %S/../Inputs/resilient_struct.swift -emit-module -emit-module-path %t/resilient_struct.swiftmodule -module-name resilient_struct
+// RUN: %target-codesign %t/libresilient_struct.%target-dylib-extension
 
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -c %S/../Inputs/resilient_class.swift -I %t/ -o %t/resilient_class.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -c %S/../Inputs/resilient_class.swift -I %t/ -o %t/resilient_class.o
+// RUN: %target-build-swift-dylib(%t/libresilient_class.%target-dylib-extension) -Xfrontend -enable-resilience %S/../Inputs/resilient_class.swift -emit-module -emit-module-path %t/resilient_class.swiftmodule -module-name resilient_class -I%t -L%t -lresilient_struct
+// RUN: %target-codesign %t/libresilient_class.%target-dylib-extension
 
-// RUN: %target-build-swift %s -Xlinker %t/resilient_struct.o -Xlinker %t/resilient_class.o -I %t -L %t -o %t/main
+// RUN: %target-build-swift %s -L %t -I %t -lresilient_struct -lresilient_class -o %t/main -Xlinker -rpath -Xlinker %t
 
-// RUN: %target-run %t/main
+// RUN: %target-run %t/main %t/libresilient_struct.%target-dylib-extension %t/libresilient_class.%target-dylib-extension
+
+// RUN: %target-build-swift-dylib(%t/libresilient_struct_wmo.%target-dylib-extension) -Xfrontend -enable-resilience %S/../Inputs/resilient_struct.swift -emit-module -emit-module-path %t/resilient_struct.swiftmodule -module-name resilient_struct -whole-module-optimization
+// RUN: %target-codesign %t/libresilient_struct_wmo.%target-dylib-extension
+
+// RUN: %target-build-swift-dylib(%t/libresilient_class_wmo.%target-dylib-extension) -Xfrontend -enable-resilience %S/../Inputs/resilient_class.swift -emit-module -emit-module-path %t/resilient_class.swiftmodule -module-name resilient_class -I%t -L%t -lresilient_struct_wmo -whole-module-optimization
+// RUN: %target-codesign %t/libresilient_class_wmo.%target-dylib-extension
+
+// RUN: %target-build-swift %s -L %t -I %t -lresilient_struct -lresilient_class -o %t/main -Xlinker -rpath -Xlinker %t
+
+// RUN: %target-run %t/main %t/libresilient_struct_wmo.%target-dylib-extension %t/libresilient_class_wmo.%target-dylib-extension
+
+// REQUIRES: executable_test
 
 import StdlibUnittest
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-import SwiftPrivate
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
 import resilient_class
 import resilient_struct
@@ -43,7 +48,7 @@ public class ClassWithResilientProperty : ProtocolWithResilientProperty {
   }
 }
 
-@inline(never) func getS(p: ProtocolWithResilientProperty) -> Size {
+@inline(never) func getS(_ p: ProtocolWithResilientProperty) -> Size {
   return p.s
 }
 
@@ -58,12 +63,27 @@ ResilientClassTestSuite.test("ClassWithResilientProperty") {
   expectEqual(c.s.w, 30)
   expectEqual(c.s.h, 40)
   expectEqual(c.color, 50)
-  expectTrue(_typeByName("main.ClassWithResilientProperty")
-             == ClassWithResilientProperty.self)
 
   // Make sure the conformance works
   expectEqual(getS(c).w, 30)
   expectEqual(getS(c).h, 40)
+}
+
+ResilientClassTestSuite.test("OutsideClassWithResilientProperty") {
+  let c = OutsideParentWithResilientProperty(
+      p: Point(x: 10, y: 20),
+      s: Size(w: 30, h: 40),
+      color: 50)
+
+  expectEqual(c.p.x, 10)
+  expectEqual(c.p.y, 20)
+  expectEqual(c.s.w, 30)
+  expectEqual(c.s.h, 40)
+  expectEqual(c.color, 50)
+
+  expectEqual(0, c.laziestNumber)
+  c.laziestNumber = 1
+  expectEqual(1, c.laziestNumber)
 }
 
 
@@ -121,8 +141,6 @@ ResilientClassTestSuite.test("ClassWithResilientlySizedProperty") {
   expectEqual(c.r.s.h, 40)
   expectEqual(c.r.color, 50)
   expectEqual(c.color, 60)
-  expectTrue(_typeByName("main.ClassWithResilientlySizedProperty")
-    == ClassWithResilientlySizedProperty.self)
 }
 
 
@@ -150,8 +168,6 @@ ResilientClassTestSuite.test("ChildOfParentWithResilientStoredProperty") {
   expectEqual(c.s.h, 40)
   expectEqual(c.color, 50)
   expectEqual(c.enabled, 60)
-  expectTrue(_typeByName("main.ChildOfParentWithResilientStoredProperty")
-    == ChildOfParentWithResilientStoredProperty.self)
 }
 
 
@@ -179,8 +195,6 @@ ResilientClassTestSuite.test("ChildOfOutsideParentWithResilientStoredProperty") 
   expectEqual(c.s.h, 40)
   expectEqual(c.color, 50)
   expectEqual(c.enabled, 60)
-  expectTrue(_typeByName("main.ChildOfOutsideParentWithResilientStoredProperty")
-    == ChildOfOutsideParentWithResilientStoredProperty.self)
 }
 
 
@@ -248,6 +262,18 @@ ResilientClassTestSuite.test("ChildOfResilientOutsideParentWithResilientStoredPr
   expectEqual(c.color, 50)
 }
 #endif
+
+
+ResilientClassTestSuite.test("TypeByName") {
+  expectTrue(_typeByName("main.ClassWithResilientProperty")
+             == ClassWithResilientProperty.self)
+  expectTrue(_typeByName("main.ClassWithResilientlySizedProperty")
+             == ClassWithResilientlySizedProperty.self)
+  expectTrue(_typeByName("main.ChildOfParentWithResilientStoredProperty")
+             == ChildOfParentWithResilientStoredProperty.self)
+  expectTrue(_typeByName("main.ChildOfOutsideParentWithResilientStoredProperty")
+             == ChildOfOutsideParentWithResilientStoredProperty.self)
+}
 
 
 runAllTests()

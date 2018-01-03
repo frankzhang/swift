@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -109,7 +109,7 @@ bool LoopARCSequenceDataflowEvaluator::processLoopTopDown(const LoopRegion *R) {
 
     // Then perform the dataflow.
     NestingDetected |= SubregionData.processTopDown(
-        AA, RCFI, LRFI, DecToIncStateMap, RegionStateInfo);
+        AA, RCFI, LRFI, DecToIncStateMap, RegionStateInfo, SetFactory);
   }
 
   return NestingDetected;
@@ -217,8 +217,8 @@ bool LoopARCSequenceDataflowEvaluator::processLoopBottomUp(
 
     // Then perform the region optimization.
     NestingDetected |= SubregionData.processBottomUp(
-        AA, RCFI, LRFI, FreezeOwnedArgEpilogueReleases, ConsumedArgToReleaseMap,
-        IncToDecStateMap, RegionStateInfo);
+        AA, RCFI, EAFI, LRFI, FreezeOwnedArgEpilogueReleases, IncToDecStateMap,
+        RegionStateInfo, SetFactory);
     --End;
   }
 
@@ -236,8 +236,8 @@ bool LoopARCSequenceDataflowEvaluator::processLoopBottomUp(
 
     // Then perform the region optimization.
     NestingDetected |= SubregionData.processBottomUp(
-        AA, RCFI, LRFI, FreezeOwnedArgEpilogueReleases, ConsumedArgToReleaseMap,
-        IncToDecStateMap, RegionStateInfo);
+        AA, RCFI, EAFI, LRFI, FreezeOwnedArgEpilogueReleases, IncToDecStateMap,
+        RegionStateInfo, SetFactory);
   }
 
   return NestingDetected;
@@ -250,12 +250,13 @@ bool LoopARCSequenceDataflowEvaluator::processLoopBottomUp(
 LoopARCSequenceDataflowEvaluator::LoopARCSequenceDataflowEvaluator(
     SILFunction &F, AliasAnalysis *AA, LoopRegionFunctionInfo *LRFI,
     SILLoopInfo *SLI, RCIdentityFunctionInfo *RCFI,
+    EpilogueARCFunctionInfo *EAFI,
     ProgramTerminationFunctionInfo *PTFI,
     BlotMapVector<SILInstruction *, TopDownRefCountState> &DecToIncStateMap,
     BlotMapVector<SILInstruction *, BottomUpRefCountState> &IncToDecStateMap)
-    : F(F), AA(AA), LRFI(LRFI), SLI(SLI), RCFI(RCFI),
-      DecToIncStateMap(DecToIncStateMap), IncToDecStateMap(IncToDecStateMap),
-      ConsumedArgToReleaseMap(RCFI, &F) {
+    : Allocator(), SetFactory(Allocator), F(F), AA(AA), LRFI(LRFI), SLI(SLI),
+      RCFI(RCFI), EAFI(EAFI), DecToIncStateMap(DecToIncStateMap),
+      IncToDecStateMap(IncToDecStateMap) {
   for (auto *R : LRFI->getRegions()) {
     bool AllowsLeaks = false;
     if (R->isBlock())
@@ -273,8 +274,6 @@ LoopARCSequenceDataflowEvaluator::~LoopARCSequenceDataflowEvaluator() {
 bool LoopARCSequenceDataflowEvaluator::runOnLoop(
     const LoopRegion *R, bool FreezeOwnedArgEpilogueReleases,
     bool RecomputePostDomReleases) {
-  if (RecomputePostDomReleases)
-    ConsumedArgToReleaseMap.recompute();
   bool NestingDetected = processLoopBottomUp(R, FreezeOwnedArgEpilogueReleases);
   NestingDetected |= processLoopTopDown(R);
   return NestingDetected;
@@ -285,7 +284,28 @@ void LoopARCSequenceDataflowEvaluator::summarizeLoop(
   RegionStateInfo[R]->summarize(LRFI, RegionStateInfo);
 }
 
+void LoopARCSequenceDataflowEvaluator::summarizeSubregionBlocks(
+    const LoopRegion *R) {
+  for (unsigned SubregionID : R->getSubregions()) {
+    auto *Subregion = LRFI->getRegion(SubregionID);
+    if (!Subregion->isBlock())
+      continue;
+    RegionStateInfo[Subregion]->summarizeBlock(Subregion->getBlock());
+  }
+}
+
 void LoopARCSequenceDataflowEvaluator::clearLoopState(const LoopRegion *R) {
   for (unsigned SubregionID : R->getSubregions())
     getARCState(LRFI->getRegion(SubregionID)).clear();
+}
+
+void LoopARCSequenceDataflowEvaluator::addInterestingInst(SILInstruction *I) {
+  auto *Region = LRFI->getRegion(I->getParent());
+  RegionStateInfo[Region]->addInterestingInst(I);
+}
+
+void LoopARCSequenceDataflowEvaluator::removeInterestingInst(
+    SILInstruction *I) {
+  auto *Region = LRFI->getRegion(I->getParent());
+  RegionStateInfo[Region]->removeInterestingInst(I);
 }

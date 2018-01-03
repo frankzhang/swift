@@ -1,9 +1,7 @@
 // Try with and without whole module optimization
 
-// RUN: %target-build-swift %S/library.swift %S/main.swift
-// RUN: %target-build-swift -whole-module-optimization %S/library.swift %S/main.swift
-
-// REQUIRES: executable_test
+// RUN: %target-build-swift %S/Inputs/library.swift %S/main.swift
+// RUN: %target-build-swift -whole-module-optimization %S/Inputs/library.swift %S/main.swift
 
 protocol Takeaway {
   var costPounds: Float { get set }
@@ -11,7 +9,19 @@ protocol Takeaway {
   var costDollars: Float { get set }
 }
 
-extension FishAndChips: Takeaway {}
+extension FishAndChips : Takeaway {}
+
+protocol Beverage {
+  var abv: Int { get set }
+}
+
+extension Beer : Beverage {}
+
+protocol PurrExtractor {
+  var purrs: Int { get set }
+}
+
+extension LazyCat : PurrExtractor {}
 
 // Dummy statement
 _ = ()

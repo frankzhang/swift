@@ -1,77 +1,67 @@
-# cmpcodesize/compare.py - Compare sizes of built products -*- python -*-
+# ====--- compare.py - Compare built products' sizes -*- coding: utf-8 -*-===//
 #
 # This source file is part of the Swift.org open source project
 #
-# Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+# Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 # Licensed under Apache License v2.0 with Runtime Library Exception
 #
-# See http://swift.org/LICENSE.txt for license information
-# See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+# See https://swift.org/LICENSE.txt for license information
+# See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
 from __future__ import print_function
 
-import re
-import os
-import subprocess
 import collections
+import os
+import re
+import subprocess
+
 from operator import itemgetter
 
-Prefixes = {
+categories = [
     # Cpp
-    "__Z": "CPP",
-    "_swift": "CPP",
-    "__swift": "CPP",
+    ["CPP", re.compile('^(__Z|_+swift)')],
 
     # Objective-C
-    "+[": "ObjC",
-    "-[": "ObjC",
+    ["ObjC", re.compile('^[+-]\[')],
 
     # Swift
-    "__TP": "Partial Apply",
-    "__TTW": "Protocol Witness",
-    "__Tw": "Value Witness",
-    "__TM": "Type Metadata",
-    "__TF": "Swift Function",
-    "__TTSg": "Generic Spec",
-    "__TTSf": "FuncSig Spec",
-    "__TZF": "Static Func",
+    ["Partial Apply", re.compile('^__(TPA|T0.*T[aA]$)')],
+    ["Protocol Witness", re.compile('^__(TTW|T0.*TW$)')],
+    ["Value Witness", re.compile('^__(Tw|T0.*w..$)')],
+    ["Type Metadata", re.compile('^__(TM|T0.*(N|M.)$)')],
     # Function signature specialization of a generic specialization.
-    "__TTSGF": "FuncSigGen Spec",
-    "__TTo": "Swift @objc Func",
-}
+    ["FuncSigGen Spec", re.compile(
+        '^__(TTSf.*__TTSg|T0.*T[gGpP]q?[0-9].*Tfq?[0-9])')],
+    ["Generic Spec", re.compile('^__(TTSg|T0.*T[gG]q?[0-9])')],
+    ["Partial Spec", re.compile('^__(T0.*T[pP]q?[0-9])')],
+    ["FuncSig Spec", re.compile('^__(TTSf|T0.*Tfq?[0-9])')],
+    ["Generic Function", re.compile(
+        '__(T[^0].*q(x|d?[0-9]*_)|T0.*q(z|d?[0-9]*_))')],
+    ["Static Func", re.compile('^__(TZF|T0.*FZ)')],
+    ["Swift @objc Func", re.compile('^__(TTo|T0.*To$)')],
+    ["Accessor", re.compile('^__(TW[atTlI]|T0.*W[atTlI]$)')],
+    ["Getter/Setter", re.compile('^__(T[Fvi][gsmwWl]|T0.*f[gGsmwWal]$)')],
+    ["Swift Function", re.compile('^__(TF|T0.*(F|f.|f[AuU][0-9]*_)$)')],
+    ["Unknown", re.compile('')]
+]
 
-Infixes = {
-    #Swift
-    "q_": "Generic Function"
-}
 
-GenericFunctionPrefix = "__TTSg"
-
-SortedPrefixes = sorted(Prefixes)
-SortedInfixes = sorted(Infixes)
-
-
-def addFunction(sizes, function, startAddr, endAddr, groupByPrefix):
-    if not function or startAddr is None or endAddr is None:
+def add_function(sizes, function, start_addr, end_addr, group_by_prefix):
+    if not function or start_addr is None or end_addr is None:
         return
 
-    size = endAddr - startAddr
+    size = end_addr - start_addr
 
-    if groupByPrefix:
-        for infix in SortedInfixes:
-	    if infix in function:
-               if GenericFunctionPrefix not in function:
-	           sizes[Infixes[infix]] += size
-                   return
-        for prefix in SortedPrefixes:
-	    if function.startswith(prefix):
-                # Special handling for function signature specializations
-                # of generic specializations.
-                if prefix == "__TTSf" and GenericFunctionPrefix in function:
-                    prefix = "__TTSGF"
-                sizes[Prefixes[prefix]] += size
+    if group_by_prefix:
+        if function.endswith('_merged'):
+            function = function[:-7]
+        for cat in categories:
+            cat_name = cat[0]
+            pattern = cat[1]
+            if pattern.match(function):
+                sizes[cat_name] += size
                 return
-        sizes["Unknown"] += size
+        assert False, "function name not matching any pattern"
     else:
         sizes[function] += size
 
@@ -85,187 +75,218 @@ def flatten(*args):
             yield x
 
 
-def readSizes(sizes, fileName, functionDetails, groupByPrefix):
+def read_sizes(sizes, file_name, function_details, group_by_prefix):
     # Check if multiple architectures are supported by the object file.
     # Prefer arm64 if available.
-    architectures = subprocess.check_output(["otool", "-V", "-f", fileName]).split("\n")
+    architectures = subprocess.check_output(
+        ["otool", "-V", "-f", file_name]).split("\n")
     arch = None
-    archPattern = re.compile('architecture ([\S]+)')
+    arch_pattern = re.compile('architecture ([\S]+)')
     for architecture in architectures:
-        archMatch = archPattern.match(architecture)
-        if archMatch:
+        arch_match = arch_pattern.match(architecture)
+        if arch_match:
             if arch is None:
-                arch = archMatch.group(1)
+                arch = arch_match.group(1)
             if "arm64" in arch:
                 arch = "arm64"
     if arch is not None:
-      archParams = ["-arch", arch]
+        arch_params = ["-arch", arch]
     else:
-      archParams = []
+        arch_params = []
 
-    if functionDetails:
-        content = subprocess.check_output(flatten(["otool", archParams, "-l", "-v", "-t", fileName])).split("\n")
-        content += subprocess.check_output(flatten(["otool", archParams, "-v", "-s", "__TEXT", "__textcoal_nt", fileName])).split("\n")
+    if function_details:
+        content = subprocess.check_output(
+            flatten([
+                "otool",
+                arch_params,
+                "-l",
+                "-v",
+                "-t",
+                file_name]
+            )).split("\n")
+        content += subprocess.check_output(flatten(
+            ["otool", arch_params, "-v", "-s", "__TEXT", "__textcoal_nt",
+             file_name])).split("\n")
     else:
-        content = subprocess.check_output(flatten(["otool", archParams, "-l", fileName])).split("\n")
+        content = subprocess.check_output(
+            flatten(["otool", arch_params, "-l", file_name])).split("\n")
 
-    sectName = None
-    currFunc = None
-    startAddr = None
-    endAddr = None
+    sect_name = None
+    curr_func = None
+    start_addr = None
+    end_addr = None
 
-    sectionPattern = re.compile(' +sectname ([\S]+)')
-    sizePattern = re.compile(' +size ([\da-fx]+)')
-    asmlinePattern = re.compile('^([0-9a-fA-F]+)\s')
-    labelPattern = re.compile('^((\-*\[[^\]]*\])|[^\/\s]+):$')
+    section_pattern = re.compile(' +sectname ([\S]+)')
+    size_pattern = re.compile(' +size ([\da-fx]+)')
+    asmline_pattern = re.compile('^([0-9a-fA-F]+)\s')
+    label_pattern = re.compile('^((\-*\[[^\]]*\])|[^\/\s]+):$')
 
     for line in content:
-        asmlineMatch = asmlinePattern.match(line)
-        if asmlineMatch:
-            addr = int(asmlineMatch.group(1), 16)
-            if startAddr is None:
-                startAddr = addr
-            endAddr = addr
+        asmline_match = asmline_pattern.match(line)
+        if asmline_match:
+            addr = int(asmline_match.group(1), 16)
+            if start_addr is None:
+                start_addr = addr
+            end_addr = addr
         elif line == "Section":
-            sectName = None
+            sect_name = None
         else:
-            labelMatch = labelPattern.match(line)
-            sizeMatch = sizePattern.match(line)
-            sectionMatch = sectionPattern.match(line)
-            if labelMatch:
-                funcName = labelMatch.group(1)
-                addFunction(sizes, currFunc, startAddr, endAddr, groupByPrefix)
-                currFunc = funcName
-                startAddr = None
-                endAddr = None
-            elif sizeMatch and sectName and groupByPrefix:
-                size = int(sizeMatch.group(1), 16)
-                sizes[sectName] += size
-            elif sectionMatch:
-                sectName = sectionMatch.group(1)
-                if sectName == "__textcoal_nt":
-                    sectName = "__text"
+            label_match = label_pattern.match(line)
+            size_match = size_pattern.match(line)
+            section_match = section_pattern.match(line)
+            if label_match:
+                func_name = label_match.group(1)
+                add_function(sizes, curr_func, start_addr,
+                             end_addr, group_by_prefix)
+                curr_func = func_name
+                start_addr = None
+                end_addr = None
+            elif size_match and sect_name and group_by_prefix:
+                size = int(size_match.group(1), 16)
+                sizes[sect_name] += size
+            elif section_match:
+                sect_name = section_match.group(1)
+                if sect_name == "__textcoal_nt":
+                    sect_name = "__text"
 
-    addFunction(sizes, currFunc, startAddr, endAddr, groupByPrefix)
+    add_function(sizes, curr_func, start_addr, end_addr, group_by_prefix)
 
 
-def compareSizes(oldSizes, newSizes, nameKey, title):
-    oldSize = oldSizes[nameKey]
-    newSize = newSizes[nameKey]
-    if oldSize is not None and newSize is not None:
-        if oldSize != 0:
-            perc = "%.1f%%" % ((1.0 - float(newSize) / float(oldSize)) * 100.0)
+def compare_sizes(old_sizes, new_sizes, name_key, title, total_size_key=""):
+    old_size = old_sizes[name_key]
+    new_size = new_sizes[name_key]
+    if total_size_key:
+        old_total_size = old_sizes[total_size_key]
+        new_total_size = new_sizes[total_size_key]
+    if old_size is not None and new_size is not None:
+        if old_size != 0:
+            perc = "%.1f%%" % (
+                (1.0 - float(new_size) / float(old_size)) * 100.0)
         else:
             perc = "- "
-        print("%-26s%16s: %8d  %8d  %6s" % (title, nameKey, oldSize, newSize, perc))
+        if total_size_key:
+            print("%-26s%16s: %8d (%2d%%)  %8d (%2d%%)  %7s" %
+                  (title, name_key, old_size,
+                   old_size * 100.0 / old_total_size,
+                   new_size, new_size * 100.0 / new_total_size, perc))
+        else:
+            print("%-26s%16s: %14d  %14d  %7s" %
+                  (title, name_key, old_size, new_size, perc))
 
 
-def compareSizesOfFile(oldFiles, newFiles, allSections, listCategories):
-    oldSizes = collections.defaultdict(int)
-    newSizes = collections.defaultdict(int)
-    for oldFile in oldFiles:
-        readSizes(oldSizes, oldFile, listCategories, True)
-    for newFile in newFiles:
-        readSizes(newSizes, newFile, listCategories, True)
+def compare_sizes_of_file(old_files, new_files, all_sections, list_categories):
+    old_sizes = collections.defaultdict(int)
+    new_sizes = collections.defaultdict(int)
+    for old_file in old_files:
+        read_sizes(old_sizes, old_file, list_categories, True)
+    for new_file in new_files:
+        read_sizes(new_sizes, new_file, list_categories, True)
 
-    if len(oldFiles) == 1 and len(newFiles) == 1:
-        oldBase = os.path.basename(oldFiles[0])
-        newBase = os.path.basename(newFiles[0])
-        title = oldBase
-        if oldBase != newBase:
-            title += "-" + newBase
+    if len(old_files) == 1 and len(new_files) == 1:
+        old_base = os.path.basename(old_files[0])
+        new_base = os.path.basename(new_files[0])
+        title = old_base
+        if old_base != new_base:
+            title += "-" + new_base
     else:
         title = "old-new"
 
-    compareSizes(oldSizes, newSizes, "__text", title)
-    if listCategories:
-        prev = None
-        for categoryName in sorted(Prefixes.values()) + sorted(Infixes.values()) + ["Unknown"]:
-            if categoryName != prev:
-                compareSizes(oldSizes, newSizes, categoryName, "")
-            prev = categoryName
+    compare_sizes(old_sizes, new_sizes, "__text", title, "")
+    if list_categories:
+        for cat in categories:
+            cat_name = cat[0]
+            compare_sizes(old_sizes, new_sizes, cat_name, "", "__text")
 
-    if allSections:
-        sectionTitle = "    section"
-        compareSizes(oldSizes, newSizes, "__textcoal_nt", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__stubs", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__const", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__cstring", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__objc_methname", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__const", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__objc_const", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__data", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__swift1_proto", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__common", sectionTitle)
-        compareSizes(oldSizes, newSizes, "__bss", sectionTitle)
+    if all_sections:
+        section_title = "    section"
+        compare_sizes(old_sizes, new_sizes, "__textcoal_nt", section_title)
+        compare_sizes(old_sizes, new_sizes, "__stubs", section_title)
+        compare_sizes(old_sizes, new_sizes, "__const", section_title)
+        compare_sizes(old_sizes, new_sizes, "__cstring", section_title)
+        compare_sizes(old_sizes, new_sizes, "__objc_methname", section_title)
+        compare_sizes(old_sizes, new_sizes, "__const", section_title)
+        compare_sizes(old_sizes, new_sizes, "__objc_const", section_title)
+        compare_sizes(old_sizes, new_sizes, "__data", section_title)
+        compare_sizes(old_sizes, new_sizes, "__swift1_proto", section_title)
+        compare_sizes(old_sizes, new_sizes, "__common", section_title)
+        compare_sizes(old_sizes, new_sizes, "__bss", section_title)
 
 
-def listFunctionSizes(sizeArray):
-    for pair in sorted(sizeArray, key=itemgetter(1)):
+def list_function_sizes(size_array):
+    for pair in sorted(size_array, key=itemgetter(1)):
         name = pair[0]
         size = pair[1]
-        return "%8d %s" % (size, name)
+        yield "%8d %s" % (size, name)
 
 
-def compareFunctionSizes(oldFiles, newFiles):
-    oldSizes = collections.defaultdict(int)
-    newSizes = collections.defaultdict(int)
-    for name in oldFiles:
-        readSizes(oldSizes, name, True, False)
-    for name in newFiles:
-        readSizes(newSizes, name, True, False)
+def compare_function_sizes(old_files, new_files):
+    old_sizes = collections.defaultdict(int)
+    new_sizes = collections.defaultdict(int)
+    for name in old_files:
+        read_sizes(old_sizes, name, True, False)
+    for name in new_files:
+        read_sizes(new_sizes, name, True, False)
 
-    onlyInFile1 = []
-    onlyInFile2 = []
-    inBoth = []
+    only_in_file1 = []
+    only_in_file2 = []
+    in_both = []
 
-    onlyInFile1Size = 0
-    onlyInFile2Size = 0
-    inBothSize = 0
+    only_in_file1size = 0
+    only_in_file2size = 0
+    in_both_size = 0
 
-    for func, oldSize in oldSizes.items():
-        newSize = newSizes[func]
-        if newSize != 0:
-            inBoth.append((func, oldSize, newSize))
+    for func, old_size in old_sizes.items():
+        new_size = new_sizes[func]
+        if new_size != 0:
+            in_both.append((func, old_size, new_size))
         else:
-            onlyInFile1.append((func, oldSize))
-            onlyInFile1Size += oldSize
+            only_in_file1.append((func, old_size))
+            only_in_file1size += old_size
 
-    for func, newSize in newSizes.items():
-        oldSize = oldSizes[func]
-        if oldSize == 0:
-            onlyInFile2.append((func, newSize))
-            onlyInFile2Size += newSize
+    for func, new_size in new_sizes.items():
+        old_size = old_sizes[func]
+        if old_size == 0:
+            only_in_file2.append((func, new_size))
+            only_in_file2size += new_size
 
-    if onlyInFile1:
+    if only_in_file1:
         print("Only in old file(s)")
-        print(listFunctionSizes(onlyInFile1))
-        print("Total size of functions only in old file: {}".format(onlyInFile1Size))
+        print(os.linesep.join(list_function_sizes(only_in_file1)))
+        print("Total size of functions only in old file: {}".format(
+            only_in_file1size))
         print()
 
-    if onlyInFile2:
+    if only_in_file2:
         print("Only in new files(s)")
-        print(listFunctionSizes(onlyInFile2))
-        print("Total size of functions only in new file: {}".format(onlyInFile2Size))
+        print(os.linesep.join(list_function_sizes(only_in_file2)))
+        print("Total size of functions only in new file: {}".format(
+            only_in_file2size))
         print()
 
-    if inBoth:
-        sizeIncrease = 0
-        sizeDecrease = 0
+    if in_both:
+        size_increase = 0
+        size_decrease = 0
         print("%8s %8s %8s" % ("old", "new", "diff"))
-        for triple in sorted(inBoth, key=lambda tup: (tup[2] - tup[1], tup[1])):
+        for triple in sorted(
+                in_both,
+                key=lambda tup: (tup[2] - tup[1], tup[1])):
             func = triple[0]
-            oldSize = triple[1]
-            newSize = triple[2]
-            diff = newSize - oldSize
+            old_size = triple[1]
+            new_size = triple[2]
+            diff = new_size - old_size
             if diff > 0:
-                sizeIncrease += diff
+                size_increase += diff
             else:
-                sizeDecrease -= diff
+                size_decrease -= diff
             if diff == 0:
-                inBothSize += newSize
-            print("%8d %8d %8d %s" % (oldSize, newSize, newSize - oldSize, func))
-        print("Total size of functions with the same size in both files: {}".format(inBothSize))
-        print("Total size of functions that got smaller: {}".format(sizeDecrease))
-        print("Total size of functions that got bigger: {}".format(sizeIncrease))
-        print("Total size change of functions present in both files: {}".format(sizeIncrease - sizeDecrease))
+                in_both_size += new_size
+            print("%8d %8d %8d %s" %
+                  (old_size, new_size, new_size - old_size, func))
+        print("Total size of functions " +
+              "with the same size in both files: {}".format(in_both_size))
+        print("Total size of functions " +
+              "that got smaller: {}".format(size_decrease))
+        print("Total size of functions " +
+              "that got bigger: {}".format(size_increase))
+        print("Total size change of functions present " +
+              "in both files: {}".format(size_increase - size_decrease))

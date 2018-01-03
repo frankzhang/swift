@@ -2,17 +2,18 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "arc-sequence-opts"
 #include "RefCountState.h"
 #include "RCStateTransition.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 
 using namespace swift;
@@ -80,11 +81,16 @@ MergeTopDownLatticeStates(TopDownRefCountState::LatticeState L1,
 
 /// Initializes/reinitialized the state for I. If we reinitialize we return
 /// true.
-bool BottomUpRefCountState::initWithMutatorInst(SILInstruction *I) {
-  assert((isa<StrongReleaseInst>(I) || isa<ReleaseValueInst>(I)) &&
+bool BottomUpRefCountState::initWithMutatorInst(
+    ImmutablePointerSet<SILInstruction> *I,
+    RCIdentityFunctionInfo *RCFI) {
+  assert(I->size() == 1);
+  SILInstruction *Inst = *I->begin();
+  assert((isa<StrongReleaseInst>(Inst) || isa<ReleaseValueInst>(Inst)) &&
          "strong_release and release_value are only supported.");
+  (void) Inst;
 
-  bool NestingDetected = SuperTy::initWithMutatorInst(I);
+  bool NestingDetected = SuperTy::initWithMutatorInst(I, RCFI);
 
   // If we know that there is another decrement on the same pointer that has
   // not been matched up to an increment, then the pointer must have a
@@ -121,7 +127,7 @@ void BottomUpRefCountState::clear() {
   // be removed, be conservative and clear the transition state, so we do not
   // propagate KnownSafety forward.
   if (mightRemoveMutators())
-    Transition = None;
+    Transition = RCStateTransition();
   LatState = LatticeState::None;
   SuperTy::clear();
 }
@@ -137,6 +143,8 @@ bool BottomUpRefCountState::isRefCountStateModified() const {
   case LatticeState::MightBeUsed:
     return false;
   }
+
+  llvm_unreachable("Unhandled TermKind in switch.");
 }
 
 /// Returns true if given the current lattice state, do we care if the value
@@ -150,6 +158,8 @@ bool BottomUpRefCountState::valueCanBeDecrementedGivenLatticeState() const {
   case LatticeState::Decremented:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// If advance the state's sequence appropriately for a decrement. If we do
@@ -164,6 +174,8 @@ bool BottomUpRefCountState::handleDecrement() {
   case LatticeState::Decremented:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Returns true if given the current lattice state, do we care if the value we
@@ -177,12 +189,15 @@ bool BottomUpRefCountState::valueCanBeUsedGivenLatticeState() const {
   case LatticeState::MightBeUsed:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Given the current lattice state, if we have seen a use, advance the
 /// lattice state. Return true if we do so and false otherwise.
-bool BottomUpRefCountState::handleUser(ArrayRef<SILInstruction *> NewInsertPts,
-                                       SILValue RCIdentity, AliasAnalysis *AA) {
+bool BottomUpRefCountState::handleUser(
+    SILValue RCIdentity,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   assert(valueCanBeUsedGivenLatticeState() &&
          "Must be able to be used at this point of the lattice.");
 
@@ -190,15 +205,14 @@ bool BottomUpRefCountState::handleUser(ArrayRef<SILInstruction *> NewInsertPts,
   switch (LatState) {
   case LatticeState::Decremented:
     LatState = LatticeState::MightBeUsed;
-    assert(InsertPts.empty() && "If we are decremented, we should have no "
-                                "insertion points.");
-    InsertPts.insert(NewInsertPts.begin(), NewInsertPts.end());
     return true;
   case LatticeState::MightBeUsed:
   case LatticeState::MightBeDecremented:
   case LatticeState::None:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Returns true if given the current lattice state, do we care if the value
@@ -213,13 +227,15 @@ valueCanBeGuaranteedUsedGivenLatticeState() const {
   case LatticeState::MightBeUsed:
     return true;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Given the current lattice state, if we have seen a use, advance the
 /// lattice state. Return true if we do so and false otherwise.
 bool BottomUpRefCountState::handleGuaranteedUser(
-    ArrayRef<SILInstruction *> NewInsertPts, SILValue RCIdentity,
-    AliasAnalysis *AA) {
+    SILValue RCIdentity,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   assert(valueCanBeGuaranteedUsedGivenLatticeState() &&
          "Must be able to be used at this point of the lattice.");
 
@@ -227,9 +243,6 @@ bool BottomUpRefCountState::handleGuaranteedUser(
   switch (LatState) {
   // If were decremented, insert the insertion point.
   case LatticeState::Decremented: {
-    assert(InsertPts.empty() && "If we are decremented, we should have no "
-                                "insertion points.");
-    InsertPts.insert(NewInsertPts.begin(), NewInsertPts.end());
     LatState = LatticeState::MightBeDecremented;
     return true;
   }
@@ -242,6 +255,8 @@ bool BottomUpRefCountState::handleGuaranteedUser(
   case LatticeState::None:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 // Returns true if the passed in ref count inst matches the ref count inst
@@ -249,13 +264,13 @@ bool BottomUpRefCountState::handleGuaranteedUser(
 bool BottomUpRefCountState::isRefCountInstMatchedToTrackedInstruction(
     SILInstruction *RefCountInst) {
   // If we are not tracking any state transitions bail.
-  if (!Transition.hasValue())
+  if (!Transition.isValid())
     return false;
 
   // Otherwise, ask the transition state if this instruction causes a
   // transition that can be matched with the transition in order to eliminate
   // the transition.
-  if (!Transition->matchingInst(RefCountInst))
+  if (!Transition.matchingInst(RefCountInst))
     return false;
 
   return handleRefCountInstMatch(RefCountInst);
@@ -275,11 +290,12 @@ handleRefCountInstMatch(SILInstruction *RefCountInst) {
   case LatticeState::MightBeUsed:
     // Unset InsertPt so we remove retain release pairs instead of
     // performing code motion.
-    InsertPts.clear();
-    SWIFT_FALLTHROUGH;
+    LLVM_FALLTHROUGH;
   case LatticeState::MightBeDecremented:
     return true;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 bool BottomUpRefCountState::merge(const BottomUpRefCountState &Other) {
@@ -316,20 +332,13 @@ bool BottomUpRefCountState::merge(const BottomUpRefCountState &Other) {
     return false;
   }
 
-  if (!Transition.hasValue() || !Other.Transition.hasValue() ||
-      !Transition->merge(Other.Transition.getValue())) {
+  if (!Transition.isValid() || !Other.Transition.isValid() ||
+      !Transition.merge(Other.Transition)) {
     DEBUG(llvm::dbgs() << "            Failed merge!\n");
     clear();
     return false;
   }
 
-  Partial |= Other.Partial;
-  Partial |= InsertPts.size() != Other.InsertPts.size();
-  for (auto *SI : Other.InsertPts)
-    Partial |= InsertPts.insert(SI).second;
-
-  DEBUG(llvm::dbgs() << "            Partial: " << (Partial ? "yes" : "no")
-                     << "\n");
   return true;
 }
 
@@ -337,8 +346,8 @@ bool BottomUpRefCountState::merge(const BottomUpRefCountState &Other) {
 // the value we are tracking. If so advance the state's sequence appropriately
 // and return true. Otherwise return false.
 bool BottomUpRefCountState::handlePotentialGuaranteedUser(
-    SILInstruction *PotentialGuaranteedUser, SILInstruction *InsertPt,
-    AliasAnalysis *AA) {
+    SILInstruction *PotentialGuaranteedUser,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If we are not tracking a ref count, just return false.
   if (!isTrackingRefCount())
     return false;
@@ -364,7 +373,7 @@ bool BottomUpRefCountState::handlePotentialGuaranteedUser(
       FoundNonARCUser = true;
 
   // Otherwise, update the ref count state given the guaranteed user.
-  return handleGuaranteedUser(InsertPt, getRCRoot(), AA);
+  return handleGuaranteedUser(getRCRoot(), SetFactory, AA);
 }
 
 /// Check if PotentialDecrement can decrement the reference count associated
@@ -398,8 +407,8 @@ bool BottomUpRefCountState::handlePotentialDecrement(
 // requires user to be alive. If so advance the state's sequence
 // appropriately and return true. Otherwise return false.
 bool BottomUpRefCountState::handlePotentialUser(
-    SILInstruction *PotentialUser, ArrayRef<SILInstruction *> InsertPts,
-    AliasAnalysis *AA) {
+    SILInstruction *PotentialUser,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
 
   // If we are not tracking a ref count, just return false.
   if (!isTrackingRefCount())
@@ -413,7 +422,7 @@ bool BottomUpRefCountState::handlePotentialUser(
   if (!valueCanBeUsedGivenLatticeState())
     return false;
 
-  if (!mayUseValue(PotentialUser, getRCRoot(), AA))
+  if (!mayHaveSymmetricInterference(PotentialUser, getRCRoot(), AA))
     return false;
 
   // Instructions that we do not recognize (and thus will not move) and that
@@ -423,12 +432,12 @@ bool BottomUpRefCountState::handlePotentialUser(
     if (mustUseValue(PotentialUser, getRCRoot(), AA))
       FoundNonARCUser = true;
 
-  return handleUser(InsertPts, getRCRoot(), AA);
+  return handleUser(getRCRoot(), SetFactory, AA);
 }
 
-void BottomUpRefCountState::updateForSameLoopInst(SILInstruction *I,
-                                                  SILInstruction *InsertPt,
-                                                  AliasAnalysis *AA) {
+void BottomUpRefCountState::updateForSameLoopInst(
+    SILInstruction *I,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If this state is not tracking anything, there is nothing to update.
   if (!isTrackingRefCount())
     return;
@@ -437,7 +446,7 @@ void BottomUpRefCountState::updateForSameLoopInst(SILInstruction *I,
   // instruction in a way that requires us to guarantee the lifetime of the
   // pointer up to this point. This has the effect of performing a use and a
   // decrement.
-  if (handlePotentialGuaranteedUser(I, InsertPt, AA)) {
+  if (handlePotentialGuaranteedUser(I, SetFactory, AA)) {
     DEBUG(llvm::dbgs() << "    Found Potential Guaranteed Use:\n        "
                        << getRCRoot());
     return;
@@ -454,14 +463,14 @@ void BottomUpRefCountState::updateForSameLoopInst(SILInstruction *I,
 
   // Otherwise check if the reference counted value we are tracking
   // could be used by the given instruction.
-  if (!handlePotentialUser(I, InsertPt, AA))
+  if (!handlePotentialUser(I, SetFactory, AA))
     return;
   DEBUG(llvm::dbgs() << "    Found Potential Use:\n        " << getRCRoot());
 }
 
 void BottomUpRefCountState::updateForDifferentLoopInst(
-    SILInstruction *I, ArrayRef<SILInstruction *> InsertPts,
-    AliasAnalysis *AA) {
+    SILInstruction *I,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If we are not tracking anything, bail.
   if (!isTrackingRefCount())
     return;
@@ -471,7 +480,7 @@ void BottomUpRefCountState::updateForDifferentLoopInst(
         mayDecrementRefCount(I, getRCRoot(), AA)) {
       DEBUG(llvm::dbgs() << "    Found potential guaranteed use:\n        "
                          << getRCRoot());
-      handleGuaranteedUser(InsertPts, getRCRoot(), AA);
+      handleGuaranteedUser(getRCRoot(), SetFactory, AA);
       return;
     }
   }
@@ -479,14 +488,14 @@ void BottomUpRefCountState::updateForDifferentLoopInst(
   // We can just handle potential users normally, since if we handle the user we
   // already saw a decrement implying that we will treat this like a guaranteed
   // use.
-  if (!handlePotentialUser(I, InsertPts, AA))
+  if (!handlePotentialUser(I, SetFactory, AA))
     return;
   DEBUG(llvm::dbgs() << "    Found Potential Use:\n        " << getRCRoot());
 }
 
 void BottomUpRefCountState::updateForPredTerminators(
-    ArrayRef<SILInstruction *> Terms, SILInstruction *InsertPt,
-    AliasAnalysis *AA) {
+    ArrayRef<SILInstruction *> Terms,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If this state is not tracking anything, there is nothing to update.
   if (!isTrackingRefCount())
     return;
@@ -496,7 +505,7 @@ void BottomUpRefCountState::updateForPredTerminators(
                   [this, &AA](SILInstruction *I) -> bool {
                     return mayGuaranteedUseValue(I, getRCRoot(), AA);
                   })) {
-    handleGuaranteedUser(InsertPt, getRCRoot(), AA);
+    handleGuaranteedUser(getRCRoot(), SetFactory, AA);
     return;
   }
 
@@ -512,10 +521,10 @@ void BottomUpRefCountState::updateForPredTerminators(
   if (!valueCanBeUsedGivenLatticeState() ||
       std::none_of(Terms.begin(), Terms.end(),
                    [this, &AA](SILInstruction *I)
-                       -> bool { return mayUseValue(I, getRCRoot(), AA); }))
+       -> bool { return mayHaveSymmetricInterference(I, getRCRoot(), AA); }))
     return;
 
-  handleUser(InsertPt, getRCRoot(), AA);
+  handleUser(getRCRoot(), SetFactory, AA);
 }
 
 //===----------------------------------------------------------------------===//
@@ -524,11 +533,16 @@ void BottomUpRefCountState::updateForPredTerminators(
 
 /// Initializes/reinitialized the state for I. If we reinitialize we return
 /// true.
-bool TopDownRefCountState::initWithMutatorInst(SILInstruction *I) {
-  assert((isa<StrongRetainInst>(I) || isa<RetainValueInst>(I)) &&
+bool TopDownRefCountState::initWithMutatorInst(
+    ImmutablePointerSet<SILInstruction> *I,
+    RCIdentityFunctionInfo *RCFI) {
+  assert(I->size() == 1);
+  SILInstruction *Inst = *I->begin();
+  (void)Inst;
+  assert((isa<StrongRetainInst>(Inst) || isa<RetainValueInst>(Inst)) &&
          "strong_retain and retain_value are only supported.");
 
-  bool NestingDetected = SuperTy::initWithMutatorInst(I);
+  bool NestingDetected = SuperTy::initWithMutatorInst(I, RCFI);
 
   // This retain is known safe if the operand we are tracking was already
   // known incremented previously. This occurs when you have nested
@@ -542,33 +556,30 @@ bool TopDownRefCountState::initWithMutatorInst(SILInstruction *I) {
 }
 
 /// Initialize this ref count state with the @owned Arg at +1.
-void TopDownRefCountState::initWithArg(SILArgument *Arg) {
+void TopDownRefCountState::initWithArg(SILFunctionArgument *Arg) {
   LatState = LatticeState::Incremented;
   Transition = RCStateTransition(Arg);
-  assert((*Transition).getKind() == RCStateTransitionKind::StrongEntrance &&
+  assert(Transition.getKind() == RCStateTransitionKind::StrongEntrance &&
          "Expected a strong entrance here");
   RCRoot = Arg;
   KnownSafe = false;
-  InsertPts.clear();
 }
 
-/// Initiailize this RefCountState with an instruction which introduces a new
+/// Initialize this RefCountState with an instruction which introduces a new
 /// ref count at +1.
-void
-TopDownRefCountState::initWithEntranceInst(SILInstruction *I,
-                                           SILValue RCIdentity) {
+void TopDownRefCountState::initWithEntranceInst(
+    ImmutablePointerSet<SILInstruction> *I, SILValue RCIdentity) {
   LatState = LatticeState::Incremented;
   Transition = RCStateTransition(I);
-  assert((*Transition).getKind() == RCStateTransitionKind::StrongEntrance &&
+  assert(Transition.getKind() == RCStateTransitionKind::StrongEntrance &&
          "Expected a strong entrance here");
   RCRoot = RCIdentity;
   KnownSafe = false;
-  InsertPts.clear();
 }
 
 /// Uninitialize the current state.
 void TopDownRefCountState::clear() {
-  Transition = None;
+  Transition = RCStateTransition();
   LatState = LatticeState::None;
   SuperTy::clear();
 }
@@ -583,6 +594,8 @@ bool TopDownRefCountState::isRefCountStateModified() const {
   case LatticeState::MightBeUsed:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Returns true if given the current lattice state, do we care if the value
@@ -596,22 +609,26 @@ bool TopDownRefCountState::valueCanBeDecrementedGivenLatticeState() const {
   case LatticeState::MightBeUsed:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// If advance the state's sequence appropriately for a decrement. If we do
 /// advance return true. Otherwise return false.
-bool TopDownRefCountState::handleDecrement(SILInstruction *PotentialDecrement,
-                                           SILInstruction *InsertPt) {
+bool TopDownRefCountState::handleDecrement(
+    SILInstruction *PotentialDecrement,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory) {
   switch (LatState) {
   case LatticeState::Incremented:
     LatState = LatticeState::MightBeDecremented;
-    InsertPts.insert(InsertPt);
     return true;
   case LatticeState::None:
   case LatticeState::MightBeDecremented:
   case LatticeState::MightBeUsed:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Returns true if given the current lattice state, do we care if the value
@@ -625,6 +642,8 @@ bool TopDownRefCountState::valueCanBeUsedGivenLatticeState() const {
   case LatticeState::MightBeUsed:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Given the current lattice state, if we have seen a use, advance the
@@ -645,6 +664,8 @@ bool TopDownRefCountState::handleUser(SILInstruction *PotentialUser,
   case LatticeState::MightBeUsed:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Returns true if given the current lattice state, do we care if the value
@@ -660,23 +681,23 @@ valueCanBeGuaranteedUsedGivenLatticeState() const {
   case LatticeState::MightBeDecremented:
     return true;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 /// Given the current lattice state, if we have seen a use, advance the
 /// lattice state. Return true if we do so and false otherwise.
 bool TopDownRefCountState::handleGuaranteedUser(
-    SILInstruction *PotentialGuaranteedUser, SILInstruction *InsertPt,
-    SILValue RCIdentity, AliasAnalysis *AA) {
+    SILInstruction *PotentialGuaranteedUser,
+    SILValue RCIdentity, ImmutablePointerSetFactory<SILInstruction> &SetFactory,
+    AliasAnalysis *AA) {
   assert(valueCanBeGuaranteedUsedGivenLatticeState() &&
          "Must be able to be used at this point of the lattice.");
   // Advance the sequence...
   switch (LatState) {
   // If were decremented, insert the insertion point.
   case LatticeState::Incremented: {
-    assert(InsertPts.empty() && "If we are decremented, we should have no "
-                                "insertion points.");
     LatState = LatticeState::MightBeUsed;
-    InsertPts.insert(InsertPt);
     return true;
   }
   case LatticeState::MightBeDecremented:
@@ -688,6 +709,8 @@ bool TopDownRefCountState::handleGuaranteedUser(
   case LatticeState::None:
     return false;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 // Returns true if the passed in ref count inst matches the ref count inst
@@ -695,13 +718,13 @@ bool TopDownRefCountState::handleGuaranteedUser(
 bool TopDownRefCountState::isRefCountInstMatchedToTrackedInstruction(
     SILInstruction *RefCountInst) {
   // If we are not tracking any state transitions bail.
-  if (!Transition.hasValue())
+  if (!Transition.isValid())
     return false;
 
   // Otherwise, ask the transition state if this instruction causes a
   // transition that can be matched with the transition in order to eliminate
   // the transition.
-  if (!Transition->matchingInst(RefCountInst))
+  if (!Transition.matchingInst(RefCountInst))
     return false;
 
   return handleRefCountInstMatch(RefCountInst);
@@ -718,13 +741,11 @@ handleRefCountInstMatch(SILInstruction *RefCountInst) {
     return false;
   case LatticeState::Incremented:
   case LatticeState::MightBeDecremented:
-    // Unset InsertPt so we remove retain release pairs instead of performing
-    // code motion.
-    InsertPts.clear();
-    SWIFT_FALLTHROUGH;
   case LatticeState::MightBeUsed:
     return true;
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 bool TopDownRefCountState::merge(const TopDownRefCountState &Other) {
@@ -759,20 +780,12 @@ bool TopDownRefCountState::merge(const TopDownRefCountState &Other) {
     return false;
   }
 
-  if (!Transition.hasValue() || !Other.Transition.hasValue() ||
-      !Transition->merge(Other.Transition.getValue())) {
+  if (!Transition.isValid() || !Other.Transition.isValid() ||
+      !Transition.merge(Other.Transition)) {
     DEBUG(llvm::dbgs() << "            Failed merge!\n");
     clear();
     return false;
   }
-
-  Partial |= Other.Partial;
-  Partial |= InsertPts.size() != Other.InsertPts.size();
-  for (auto *SI : Other.InsertPts)
-    Partial |= InsertPts.insert(SI).second;
-
-  DEBUG(llvm::dbgs() << "            Partial: " << (Partial ? "yes" : "no")
-                     << "\n");
 
   return true;
 }
@@ -781,8 +794,8 @@ bool TopDownRefCountState::merge(const TopDownRefCountState &Other) {
 // the value we are tracking. If so advance the state's sequence appropriately
 // and return true. Otherwise return false.
 bool TopDownRefCountState::handlePotentialGuaranteedUser(
-    SILInstruction *PotentialGuaranteedUser, SILInstruction *InsertPt,
-    AliasAnalysis *AA) {
+    SILInstruction *PotentialGuaranteedUser,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If we are not tracking a ref count, just return false.
   if (!isTrackingRefCount())
     return false;
@@ -801,16 +814,16 @@ bool TopDownRefCountState::handlePotentialGuaranteedUser(
     return false;
 
   // Otherwise, update our step given that we have a potential decrement.
-  return handleGuaranteedUser(PotentialGuaranteedUser, InsertPt, getRCRoot(),
-                              AA);
+  return handleGuaranteedUser(PotentialGuaranteedUser, getRCRoot(),
+                              SetFactory, AA);
 }
 
 // Check if PotentialDecrement can decrement the reference count associated with
 // the value we are tracking. If so advance the state's sequence appropriately
 // and return true. Otherwise return false.
 bool TopDownRefCountState::handlePotentialDecrement(
-    SILInstruction *PotentialDecrement, SILInstruction *InsertPt,
-    AliasAnalysis *AA) {
+    SILInstruction *PotentialDecrement,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If we are not tracking a ref count, just return false.
   if (!isTrackingRefCount())
     return false;
@@ -829,7 +842,7 @@ bool TopDownRefCountState::handlePotentialDecrement(
     return false;
 
   // Otherwise, update our state given the potential decrement.
-  return handleDecrement(PotentialDecrement, InsertPt);
+  return handleDecrement(PotentialDecrement, SetFactory);
 }
 
 // Check if PotentialUser could be a use of the reference counted value that
@@ -849,15 +862,15 @@ bool TopDownRefCountState::handlePotentialUser(SILInstruction *PotentialUser,
   if (!valueCanBeUsedGivenLatticeState())
     return false;
 
-  if (!mayUseValue(PotentialUser, getRCRoot(), AA))
+  if (!mayHaveSymmetricInterference(PotentialUser, getRCRoot(), AA))
     return false;
 
   return handleUser(PotentialUser, getRCRoot(), AA);
 }
 
-void TopDownRefCountState::updateForSameLoopInst(SILInstruction *I,
-                                                 SILInstruction *InsertPt,
-                                                 AliasAnalysis *AA) {
+void TopDownRefCountState::updateForSameLoopInst(
+    SILInstruction *I, 
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If we are not tracking anything, bail.
   if (!isTrackingRefCount())
     return;
@@ -866,7 +879,7 @@ void TopDownRefCountState::updateForSameLoopInst(SILInstruction *I,
   // instruction in a way that requires us to guarantee the lifetime of the
   // pointer up to this point. This has the effect of performing a use and a
   // decrement.
-  if (handlePotentialGuaranteedUser(I, InsertPt, AA)) {
+  if (handlePotentialGuaranteedUser(I, SetFactory, AA)) {
     DEBUG(llvm::dbgs() << "    Found Potential Guaranteed Use:\n        "
                        << getRCRoot());
     return;
@@ -875,7 +888,7 @@ void TopDownRefCountState::updateForSameLoopInst(SILInstruction *I,
   // Check if the instruction we are visiting could potentially decrement
   // the reference counted value we are tracking in a manner that could
   // cause us to change states. If we do change states continue...
-  if (handlePotentialDecrement(I, InsertPt, AA)) {
+  if (handlePotentialDecrement(I, SetFactory, AA)) {
     DEBUG(llvm::dbgs() << "    Found Potential Decrement:\n        "
                        << getRCRoot());
     return;
@@ -888,9 +901,9 @@ void TopDownRefCountState::updateForSameLoopInst(SILInstruction *I,
   DEBUG(llvm::dbgs() << "    Found Potential Use:\n        " << getRCRoot());
 }
 
-void TopDownRefCountState::updateForDifferentLoopInst(SILInstruction *I,
-                                                      SILInstruction *InsertPt,
-                                                      AliasAnalysis *AA) {
+void TopDownRefCountState::updateForDifferentLoopInst(
+    SILInstruction *I,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory, AliasAnalysis *AA) {
   // If we are not tracking anything, bail.
   if (!isTrackingRefCount())
     return;
@@ -899,7 +912,7 @@ void TopDownRefCountState::updateForDifferentLoopInst(SILInstruction *I,
     if (mayGuaranteedUseValue(I, getRCRoot(), AA) ||
         mayDecrementRefCount(I, getRCRoot(), AA)) {
       DEBUG(llvm::dbgs() << "    Found potential guaranteed use!\n");
-      handleGuaranteedUser(I, InsertPt, getRCRoot(), AA);
+      handleGuaranteedUser(I, getRCRoot(), SetFactory, AA);
       return;
     }
   }
@@ -928,6 +941,8 @@ raw_ostream &operator<<(raw_ostream &OS,
   case LatticeState::MightBeDecremented:
     return OS << "MightBeDecremented";
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
@@ -943,6 +958,8 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
   case LatticeState::MightBeDecremented:
     return OS << "MightBeDecremented";
   }
+
+  llvm_unreachable("Unhandled LatticeState in switch.");
 }
 
 } // end namespace llvm

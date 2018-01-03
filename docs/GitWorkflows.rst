@@ -1,5 +1,7 @@
 :orphan:
 
+.. highlight:: bash
+
 Git Workflows
 =============
 
@@ -9,9 +11,9 @@ Purpose
 Swift development has been based on SVN since its inception.  As part of the
 transition to Git this document helps to address questions about how common SVN
 workflows we use today translate to their Git counterparts as well as to discuss
-Git workflow practices we plan on having — at least initially — after the Git
-transition.  Notably we will follow a model where commits to trunk — which is
-the 'master' branch in Git — has commits land (in the common case) via rebasing
+Git workflow practices we plan on having -- at least initially -- after the Git
+transition.  Notably we will follow a model where commits to trunk -- which is
+the 'master' branch in Git -- has commits land (in the common case) via rebasing
 instead of merging.  This model is open to evolution later, but this mimics the
 workflow we have today with SVN.
 
@@ -30,7 +32,7 @@ This document will show how to translate these commands to Git and additionally
 how to configure Git. It assumes that one is attempting to manipulate a Git
 repository via bash in a terminal. A lot of information since this is supposed
 to be a short, actionable guide. For more information, please see the Git crash
-course guide for SVN users at <https://git-scm.com/course/SVN.html>
+course guide for SVN users at <https://git-scm.com/course/svn.html>
 
 *NOTE* Whenever we say the Swift repository, we mean any repository in the
 Swift project.
@@ -94,7 +96,7 @@ as follows::
 This will cause Git to clone the repository at 'repository url' and check out
 the 'master' branch. The 'master' branch corresponds to 'trunk' in SVN. For more
 information about branching in Git please see
-<https://git-scm.com/course/SVN.html#branch>
+<https://git-scm.com/course/svn.html#branch>
 
 Before beginning to commit though, we /must/ perform some default configuration
 of our repository to match the Swift repository default configuration by

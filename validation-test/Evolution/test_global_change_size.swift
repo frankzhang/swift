@@ -1,26 +1,9 @@
-// RUN: rm -rf %t && mkdir -p %t/before && mkdir -p %t/after
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/global_change_size.swift -o %t/before/global_change_size.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/global_change_size.swift -o %t/before/global_change_size.o
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/global_change_size.swift -o %t/after/global_change_size.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/global_change_size.swift -o %t/after/global_change_size.o
-
-// RUN: %target-build-swift -D BEFORE -c %s -I %t/before -o %t/before/main.o
-// RUN: %target-build-swift -D AFTER -c %s -I %t/after -o %t/after/main.o
-
-// RUN: %target-build-swift %t/before/global_change_size.o %t/before/main.o -o %t/before_before
-// RUN: %target-build-swift %t/before/global_change_size.o %t/after/main.o -o %t/before_after
-// RUN: %target-build-swift %t/after/global_change_size.o %t/before/main.o -o %t/after_before
-// RUN: %target-build-swift %t/after/global_change_size.o %t/after/main.o -o %t/after_after
-
-// RUN: %target-run %t/before_before
-// RUN: %target-run %t/before_after
-// RUN: %target-run %t/after_before
-// RUN: %target-run %t/after_after
+// RUN: %target-resilience-test-wmo
+// REQUIRES: executable_test
 
 import StdlibUnittest
 import global_change_size
+
 
 var GlobalChangeSizeTest = TestSuite("GlobalChangeSize")
 
@@ -59,6 +42,23 @@ GlobalChangeSizeTest.test("ChangeSize") {
     expectEqual(globalChangeSizeSecond.validate(), true)
     expectEqual(globalChangeSizeFirst.count, -323)
     expectEqual(globalChangeSizeSecond.count, 545)
+  }
+}
+
+GlobalChangeSizeTest.test("ChangeSizeVersioned") {
+  do {
+    expectEqual(getVersionedGlobal().validate(), true)
+    expectEqual(getVersionedGlobal().count, 0)
+
+    setVersionedGlobal(101)
+
+    expectEqual(getVersionedGlobal().validate(), true)
+    expectEqual(getVersionedGlobal().count, 101)
+
+    setVersionedGlobal(-323)
+
+    expectEqual(getVersionedGlobal().validate(), true)
+    expectEqual(getVersionedGlobal().count, -323)
   }
 }
 

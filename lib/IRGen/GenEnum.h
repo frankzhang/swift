@@ -2,16 +2,16 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __SWIFT_IRGen_GenEnum_H__
-#define __SWIFT_IRGen_GenEnum_H__
+#ifndef SWIFT_IRGEN_GENENUM_H
+#define SWIFT_IRGEN_GENENUM_H
 
 #include "TypeInfo.h"
 
@@ -23,6 +23,14 @@ namespace llvm {
   class Value;
 }
 
+namespace clang {
+namespace CodeGen {
+namespace swiftcall {
+  class SwiftAggLowering;
+}
+}
+}
+
 namespace swift {
   class EnumElementDecl;
   
@@ -31,6 +39,7 @@ namespace irgen {
   class EnumPayloadSchema;
   class IRGenFunction;
   class TypeConverter;
+  using clang::CodeGen::swiftcall::SwiftAggLowering;
 
 /// \brief Emit the dispatch branch(es) for an address-only enum.
 void emitSwitchAddressOnlyEnumDispatch(IRGenFunction &IGF,
@@ -156,18 +165,18 @@ public:
   virtual ~EnumImplStrategy() { }
   
   /// Construct a layout strategy appropriate to the enum type.
-  static EnumImplStrategy *get(TypeConverter &TC,
-                               SILType Type,
-                               EnumDecl *theEnum);
+  static std::unique_ptr<EnumImplStrategy> get(TypeConverter &TC,
+                                               SILType Type,
+                                               EnumDecl *theEnum);
   
   /// Given an incomplete StructType for the enum, completes layout of the
   /// storage type, calculates its size and alignment, and produces the
   /// TypeInfo for the enum.
   virtual TypeInfo *completeEnumTypeLayout(TypeConverter &TC,
-                                            SILType Type,
-                                            EnumDecl *theEnum,
-                                            llvm::StructType *enumTy) = 0;
-  
+                                           SILType Type,
+                                           EnumDecl *theEnum,
+                                           llvm::StructType *enumTy) = 0;
+
   const TypeInfo &getTypeInfo() const {
     assert(TI);
     return *TI;
@@ -342,24 +351,28 @@ public:
   
   /// \group Delegated TypeInfo operations
   
+  virtual void addToAggLowering(IRGenModule &IGM, SwiftAggLowering &lowering,
+                                Size offset) const = 0;
   virtual void getSchema(ExplosionSchema &schema) const = 0;
-  virtual void destroy(IRGenFunction &IGF, Address addr, SILType T) const = 0;
-  
+  virtual void destroy(IRGenFunction &IGF, Address addr, SILType T,
+                       bool isOutlined) const = 0;
+
   virtual void initializeFromParams(IRGenFunction &IGF, Explosion &params,
-                                    Address dest, SILType T) const;
-  
-  virtual void assignWithCopy(IRGenFunction &IGF, Address dest,
-                              Address src, SILType T) const = 0;
-  virtual void assignWithTake(IRGenFunction &IGF, Address dest,
-                              Address src, SILType T) const = 0;
-  virtual void initializeWithCopy(IRGenFunction &IGF, Address dest,
-                                  Address src, SILType T) const = 0;
-  virtual void initializeWithTake(IRGenFunction &IGF, Address dest,
-                                  Address src, SILType T) const = 0;
-  
+                                    Address dest, SILType T,
+                                    bool isOutlined) const;
+
+  virtual void assignWithCopy(IRGenFunction &IGF, Address dest, Address src,
+                              SILType T, bool isOutlined) const = 0;
+  virtual void assignWithTake(IRGenFunction &IGF, Address dest, Address src,
+                              SILType T, bool isOutlined) const = 0;
+  virtual void initializeWithCopy(IRGenFunction &IGF, Address dest, Address src,
+                                  SILType T, bool isOutlined) const = 0;
+  virtual void initializeWithTake(IRGenFunction &IGF, Address dest, Address src,
+                                  SILType T, bool isOutlined) const = 0;
+
   virtual void initializeMetadata(IRGenFunction &IGF,
                                   llvm::Value *metadata,
-                                  llvm::Value *vwtable,
+                                  bool isVWTMutable,
                                   SILType T) const = 0;
 
   virtual bool mayHaveExtraInhabitants(IRGenModule &IGM) const = 0;
@@ -391,15 +404,16 @@ public:
                           Explosion &e) const = 0;
   virtual void loadAsTake(IRGenFunction &IGF, Address addr,
                           Explosion &e) const = 0;
-  virtual void assign(IRGenFunction &IGF, Explosion &e,
-                      Address addr) const = 0;
-  virtual void initialize(IRGenFunction &IGF, Explosion &e,
-                          Address addr) const = 0;
+  virtual void assign(IRGenFunction &IGF, Explosion &e, Address addr,
+                      bool isOutlined) const = 0;
+  virtual void initialize(IRGenFunction &IGF, Explosion &e, Address addr,
+                          bool isOutlined) const = 0;
   virtual void reexplode(IRGenFunction &IGF, Explosion &src,
                          Explosion &dest) const = 0;
   virtual void copy(IRGenFunction &IGF, Explosion &src,
-                    Explosion &dest) const = 0;
-  virtual void consume(IRGenFunction &IGF, Explosion &src) const = 0;
+                    Explosion &dest, Atomicity atomicity) const = 0;
+  virtual void consume(IRGenFunction &IGF, Explosion &src,
+                       Atomicity atomicity) const = 0;
   virtual void fixLifetime(IRGenFunction &IGF, Explosion &src) const = 0;
   virtual void packIntoEnumPayload(IRGenFunction &IGF,
                                    EnumPayload &payload,
@@ -416,6 +430,11 @@ public:
   
   virtual llvm::Value *loadRefcountedPtr(IRGenFunction &IGF, SourceLoc loc,
                                          Address addr) const;
+
+  virtual void collectArchetypeMetadata(
+      IRGenFunction &IGF,
+      llvm::MapVector<CanType, llvm::Value *> &typeToMetadataVec,
+      SILType T) const = 0;
 
 private:
   EnumImplStrategy(const EnumImplStrategy &) = delete;

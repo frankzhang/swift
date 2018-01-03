@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,12 +22,14 @@
 using swift::RetainObserveKind;
 
 namespace {
-  /// A cache for AliasAnalysis.
-  /// This struct represents the argument list to the method 'alias'.
-  /// The two SILValue pointers are mapped to size_t indices because we need
-  /// an efficient way to invalidate them (the mechanism is described below).
-  /// The Type arguments are translated to void* because their
-  /// underlying storage is opaque pointers that never goes away.
+
+  /// A key used for the AliasAnalysis cache.
+  ///
+  /// This struct represents the argument list to the method 'alias'.  The two
+  /// SILValue pointers are mapped to size_t indices because we need an
+  /// efficient way to invalidate them (the mechanism is described below). The
+  /// Type arguments are translated to void* because their underlying storage is
+  /// opaque pointers that never goes away.
   struct AliasKeyTy {
     // The SILValue pair:
     size_t V1, V2;
@@ -35,11 +37,12 @@ namespace {
     void *T1, *T2;
   };
 
-  /// A cache for MemoryBehavior Analysis.
-  /// The two SILValue pointers are mapped to size_t indices because we need
-  /// an efficient way to invalidate them (the mechanism is described below).
-  /// The RetainObserveKind represents the inspection mode for the memory
-  /// behavior analysis.
+  /// A key used for the MemoryBehavior Analysis cache.
+  ///
+  /// The two SILValue pointers are mapped to size_t indices because we need an
+  /// efficient way to invalidate them (the mechanism is described below).  The
+  /// RetainObserveKind represents the inspection mode for the memory behavior
+  /// analysis.
   struct MemBehaviorKeyTy {
     // The SILValue pair:
     size_t V1, V2;
@@ -100,11 +103,13 @@ private:
   llvm::DenseMap<TBAACacheKey, bool> TypesMayAliasCache;
 
   /// AliasAnalysis value cache.
+  ///
   /// The alias() method uses this map to cache queries.
   llvm::DenseMap<AliasKeyTy, AliasResult> AliasCache;
 
   using MemoryBehavior = SILInstruction::MemoryBehavior;
   /// MemoryBehavior value cache.
+  ///
   /// The computeMemoryBehavior() method uses this map to cache queries.
   llvm::DenseMap<MemBehaviorKeyTy, MemoryBehavior> MemoryBehaviorCache;
 
@@ -120,7 +125,7 @@ private:
   /// NOTE: we do not use the same ValueEnumerator for the alias cache, 
   /// as when either cache is cleared, we can not clear the ValueEnumerator
   /// because doing so could give rise to collisions in the other cache.
-  ValueEnumerator<ValueBase*> MemoryBehaviorValueBaseToIndex;
+  ValueEnumerator<SILNode*> MemoryBehaviorNodeToIndex;
 
   AliasResult aliasAddressProjection(SILValue V1, SILValue V2,
                                      SILValue O1, SILValue O2);
@@ -133,12 +138,17 @@ private:
   /// Returns True if memory of type \p T1 and \p T2 may alias.
   bool typesMayAlias(SILType T1, SILType T2);
 
-  virtual void handleDeleteNotification(ValueBase *I) override {
-    // The pointer I is going away.  We can't scan the whole cache and remove
-    // all of the occurrences of the pointer. Instead we remove the pointer
-    // from the cache the translates pointers to indices.
-    AliasValueBaseToIndex.invalidateValue(I);
-    MemoryBehaviorValueBaseToIndex.invalidateValue(I);
+  virtual void handleDeleteNotification(SILNode *node) override {
+    assert(node->isRepresentativeSILNodeInObject());
+
+    // The pointer 'node' is going away.  We can't scan the whole cache
+    // and remove all of the occurrences of the pointer. Instead we remove
+    // the pointer from the cache that translates pointers to indices.
+    auto value = dyn_cast<ValueBase>(node);
+    if (!value) return;
+
+    AliasValueBaseToIndex.invalidateValue(value);
+    MemoryBehaviorNodeToIndex.invalidateValue(node);
   }
 
   virtual bool needsNotifications() override { return true; }
@@ -181,6 +191,11 @@ public:
                   SILType TBAAType2 = SILType()) {
     return alias(V1, V2, TBAAType1, TBAAType2) == AliasResult::MayAlias;
   }
+
+  /// \returns True if the release of the \p Ptr can access memory accessed by
+  /// \p User.
+  bool mayValueReleaseInterfereWithInstruction(SILInstruction *User,
+                                               SILValue Ptr);
 
   /// Use the alias analysis to determine the memory behavior of Inst with
   /// respect to V.
@@ -251,17 +266,27 @@ public:
   AliasKeyTy toAliasKey(SILValue V1, SILValue V2, SILType Type1, SILType Type2);
 
   /// Encodes the memory behavior query as a MemBehaviorKeyTy.
-  MemBehaviorKeyTy toMemoryBehaviorKey(SILValue V1, SILValue V2, RetainObserveKind K);
+  MemBehaviorKeyTy toMemoryBehaviorKey(SILInstruction *V1, SILValue V2,
+                                       RetainObserveKind K);
 
-  virtual void invalidate(SILAnalysis::InvalidationKind K) override {
+  virtual void invalidate() override {
     AliasCache.clear();
     MemoryBehaviorCache.clear();
   }
 
   virtual void invalidate(SILFunction *,
                           SILAnalysis::InvalidationKind K) override {
-    invalidate(K);
+    invalidate();
   }
+
+  /// Notify the analysis about a newly created function.
+  virtual void notifyAddFunction(SILFunction *F) override { }
+
+  /// Notify the analysis about a function which will be deleted from the
+  /// module.
+  virtual void notifyDeleteFunction(SILFunction *F) override { }
+
+  virtual void invalidateFunctionTables() override { }
 };
 
 

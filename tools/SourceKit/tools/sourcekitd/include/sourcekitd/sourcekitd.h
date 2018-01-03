@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -33,7 +33,7 @@
 
 #define SOURCEKITD_VERSION SOURCEKITD_VERSION_ENCODE( \
     SOURCEKITD_VERSION_MAJOR,                         \
-    SOURCEKITD_VERSION_MINOR )
+    SOURCEKITD_VERSION_MINOR)
 
 #define SOURCEKITD_VERSION_STRINGIZE_(major, minor)   \
     #major"."#minor
@@ -70,7 +70,7 @@
 # define SOURCEKITD_HAS_BLOCKS 0
 #endif
 
-#ifdef __GNUC__
+#if defined(__clang__) || defined(__GNUC__)
 # define SOURCEKITD_WARN_RESULT __attribute__((__warn_unused_result__))
 # define SOURCEKITD_NONNULL1 __attribute__((__nonnull__(1)))
 # define SOURCEKITD_NONNULL2 __attribute__((__nonnull__(2)))
@@ -377,7 +377,7 @@ sourcekitd_variant_dictionary_get_int64(sourcekitd_variant_t dict,
                                         sourcekitd_uid_t key);
 
 /// The underlying \c bool value for the specified key. false if the
-/// the value for the specified key is not a Boolean value or if there is no
+/// value for the specified key is not a Boolean value or if there is no
 /// value for the specified key.
 SOURCEKITD_PUBLIC SOURCEKITD_NONNULL_ALL SOURCEKITD_WARN_RESULT
 bool

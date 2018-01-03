@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,19 +25,70 @@ using namespace swift::PatternMatch;
 
 bool swift::isNotAliasingArgument(SILValue V,
                                   InoutAliasingAssumption isInoutAliasing) {
-  auto *Arg = dyn_cast<SILArgument>(V);
-  if (!Arg || !Arg->isFunctionArg())
+  auto *Arg = dyn_cast<SILFunctionArgument>(V);
+  if (!Arg)
     return false;
 
-  return isNotAliasedIndirectParameter(Arg->getParameterInfo().getConvention(),
-                                       isInoutAliasing);
+  SILArgumentConvention Conv = Arg->getArgumentConvention();
+  return Conv.isNotAliasedIndirectParameter(isInoutAliasing);
+}
+
+/// Check if the parameter \V is based on a local object, e.g. it is an
+/// allocation instruction or a struct/tuple constructed from the local objects.
+/// Returns a found local object. If a local object was not found, returns an
+/// empty SILValue.
+static bool isLocalObject(SILValue Obj) {
+  // Set of values to be checked for their locality.
+  SmallVector<SILValue, 8> WorkList;
+  // Set of processed values.
+  llvm::SmallPtrSet<SILValue, 8> Processed;
+  WorkList.push_back(Obj);
+
+  while (!WorkList.empty()) {
+    auto V = WorkList.pop_back_val();
+    if (!V)
+      return false;
+    if (Processed.count(V))
+      continue;
+    Processed.insert(V);
+    // It should be a local object.
+    V = getUnderlyingObject(V);
+    if (isa<AllocationInst>(V))
+      continue;
+    if (auto I = dyn_cast<StrongPinInst>(V)) {
+      WorkList.push_back(I->getOperand());
+      continue;
+    }
+    if (isa<StructInst>(V) || isa<TupleInst>(V) || isa<EnumInst>(V)) {
+      // A compound value is local, if all of its components are local.
+      for (auto &Op : cast<SingleValueInstruction>(V)->getAllOperands()) {
+        WorkList.push_back(Op.get());
+      }
+      continue;
+    }
+
+    if (auto *Arg = dyn_cast<SILPHIArgument>(V)) {
+      // A BB argument is local if all of its
+      // incoming values are local.
+      SmallVector<SILValue, 4> IncomingValues;
+      if (Arg->getIncomingValues(IncomingValues)) {
+        for (auto InValue : IncomingValues) {
+          WorkList.push_back(InValue);
+        }
+        continue;
+      }
+    }
+
+    // Everything else is considered to be non-local.
+    return false;
+  }
+  return true;
 }
 
 bool swift::pointsToLocalObject(SILValue V,
                                 InoutAliasingAssumption isInoutAliasing) {
   V = getUnderlyingObject(V);
-  return isa<AllocationInst>(V) ||
-        isNotAliasingArgument(V, isInoutAliasing);
+  return isLocalObject(V) || isNotAliasingArgument(V, isInoutAliasing);
 }
 
 /// Check if the value \p Value is known to be zero, non-zero or unknown.
@@ -55,7 +106,7 @@ IsZeroKind swift::isZeroValue(SILValue Value) {
     case ValueKind::UncheckedTrivialBitCastInst:
     // Extracting from a zero class returns a zero.
     case ValueKind::StructExtractInst:
-      return isZeroValue(cast<SILInstruction>(Value)->getOperand(0));
+      return isZeroValue(cast<SingleValueInstruction>(Value)->getOperand(0));
     default:
       break;
   }
@@ -95,7 +146,7 @@ IsZeroKind swift::isZeroValue(SILValue Value) {
     if (T->getFieldNo() != 0)
       return IsZeroKind::Unknown;
 
-    BuiltinInst *BI = dyn_cast<BuiltinInst>(T->getOperand());
+    auto *BI = dyn_cast<BuiltinInst>(T->getOperand());
     if (!BI)
       return IsZeroKind::Unknown;
 
@@ -127,7 +178,7 @@ Optional<bool> swift::computeSignBit(SILValue V) {
     switch (Def->getKind()) {
     // Bitcast of non-negative is non-negative
     case ValueKind::UncheckedTrivialBitCastInst:
-      Value = cast<SILInstruction>(Def)->getOperand(0);
+      Value = cast<UncheckedTrivialBitCastInst>(Def)->getOperand();
       continue;
     default:
       break;
@@ -140,9 +191,6 @@ Optional<bool> swift::computeSignBit(SILValue V) {
         return false;
       // Strideof always returns non-negative results.
       case BuiltinValueKind::Strideof:
-        return false;
-      // StrideofNonZero always returns positive results.
-      case BuiltinValueKind::StrideofNonZero:
         return false;
       // Alignof always returns non-negative results.
       case BuiltinValueKind::Alignof:

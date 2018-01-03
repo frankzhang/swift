@@ -2,79 +2,134 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
-//  To create a SequenceType that forwards requirements to an
-//  underlying SequenceType, have it conform to this protocol.
+//  To create a Sequence that forwards requirements to an
+//  underlying Sequence, have it conform to this protocol.
 //
 //===----------------------------------------------------------------------===//
 
 /// A type that is just a wrapper over some base Sequence
+@_show_in_interface
 public // @testable
-protocol _SequenceWrapperType {
-  associatedtype Base : SequenceType
-  associatedtype Generator : GeneratorType = Base.Generator
+protocol _SequenceWrapper : Sequence {
+  associatedtype Base : Sequence where Base.Element == Element
+  associatedtype Iterator = Base.Iterator
+  associatedtype SubSequence = Base.SubSequence
   
   var _base: Base { get }
 }
 
-extension SequenceType
-  where Self : _SequenceWrapperType, Self.Generator == Self.Base.Generator {
-  /// Return a *generator* over the elements of this *sequence*.
-  ///
-  /// - Complexity: O(1).
-  public func generate() -> Base.Generator {
-    return self._base.generate()
+extension _SequenceWrapper  {
+  @_inlineable // FIXME(sil-serialize-all)
+  public var underestimatedCount: Int {
+    return _base.underestimatedCount
   }
 
-  public func underestimateCount() -> Int {
-    return _base.underestimateCount()
+  @_inlineable // FIXME(sil-serialize-all)
+  public func _preprocessingPass<R>(
+    _ preprocess: () throws -> R
+  ) rethrows -> R? {
+    return try _base._preprocessingPass(preprocess)
   }
+}
 
-  @warn_unused_result
-  public func map<T>(
-    @noescape transform: (Base.Generator.Element) throws -> T
-  ) rethrows -> [T] {
-    return try _base.map(transform)
-  }
-
-  @warn_unused_result
-  public func filter(
-    @noescape includeElement: (Base.Generator.Element) throws -> Bool
-  ) rethrows -> [Base.Generator.Element] {
-    return try _base.filter(includeElement)
+extension _SequenceWrapper where Iterator == Base.Iterator {
+  @_inlineable // FIXME(sil-serialize-all)
+  public func makeIterator() -> Iterator {
+    return self._base.makeIterator()
   }
   
+  @_inlineable // FIXME(sil-serialize-all)
+  @discardableResult
+  public func _copyContents(
+    initializing buf: UnsafeMutableBufferPointer<Element>
+  ) -> (Iterator, UnsafeMutableBufferPointer<Element>.Index) {
+    return _base._copyContents(initializing: buf)
+  }
+}
+
+extension _SequenceWrapper {
+  @_inlineable // FIXME(sil-serialize-all)
+  public func map<T>(
+    _ transform: (Element) throws -> T
+) rethrows -> [T] {
+    return try _base.map(transform)
+  }
+  
+  @_inlineable // FIXME(sil-serialize-all)
+  public func filter(
+    _ isIncluded: (Element) throws -> Bool
+  ) rethrows -> [Element] {
+    return try _base.filter(isIncluded)
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func forEach(_ body: (Element) throws -> Void) rethrows {
+    return try _base.forEach(body)
+  }
+  
+  @_inlineable // FIXME(sil-serialize-all)
   public func _customContainsEquatableElement(
-    element: Base.Generator.Element
+    _ element: Element
   ) -> Bool? { 
     return _base._customContainsEquatableElement(element)
   }
   
-  /// If `self` is multi-pass (i.e., a `CollectionType`), invoke
-  /// `preprocess` on `self` and return its result.  Otherwise, return
-  /// `nil`.
-  public func _preprocessingPass<R>(@noescape preprocess: (Self) -> R) -> R? {
-    return _base._preprocessingPass { _ in preprocess(self) }
+  @_inlineable // FIXME(sil-serialize-all)
+  public func _copyToContiguousArray()
+    -> ContiguousArray<Element> {
+    return _base._copyToContiguousArray()
+  }
+}
+
+extension _SequenceWrapper where SubSequence == Base.SubSequence {
+  @_inlineable // FIXME(sil-serialize-all)
+  public func dropFirst(_ n: Int) -> SubSequence {
+    return _base.dropFirst(n)
+  }
+  @_inlineable // FIXME(sil-serialize-all)
+  public func dropLast(_ n: Int) -> SubSequence {
+    return _base.dropLast(n)
+  }
+  @_inlineable // FIXME(sil-serialize-all)
+  public func prefix(_ maxLength: Int) -> SubSequence {
+    return _base.prefix(maxLength)
+  }
+  @_inlineable // FIXME(sil-serialize-all)
+  public func suffix(_ maxLength: Int) -> SubSequence {
+    return _base.suffix(maxLength)
   }
 
-  /// Create a native array buffer containing the elements of `self`,
-  /// in the same order.
-  public func _copyToNativeArrayBuffer()
-    -> _ContiguousArrayBuffer<Base.Generator.Element> {
-    return _base._copyToNativeArrayBuffer()
+  @_inlineable // FIXME(sil-serialize-all)
+  public func drop(
+    while predicate: (Element) throws -> Bool
+  ) rethrows -> SubSequence {
+    return try _base.drop(while: predicate)
   }
 
-  /// Copy a Sequence into an array, returning one past the last
-  /// element initialized.
-  public func _initializeTo(ptr: UnsafeMutablePointer<Base.Generator.Element>)
-    -> UnsafeMutablePointer<Base.Generator.Element> {
-    return _base._initializeTo(ptr)
+  @_inlineable // FIXME(sil-serialize-all)
+  public func prefix(
+    while predicate: (Element) throws -> Bool
+  ) rethrows -> SubSequence {
+    return try _base.prefix(while: predicate)
+  }
+  
+  @_inlineable // FIXME(sil-serialize-all)
+  public func split(
+    maxSplits: Int, omittingEmptySubsequences: Bool,
+    whereSeparator isSeparator: (Element) throws -> Bool
+  ) rethrows -> [SubSequence] {
+    return try _base.split(
+      maxSplits: maxSplits,
+      omittingEmptySubsequences: omittingEmptySubsequences,
+      whereSeparator: isSeparator
+    )
   }
 }

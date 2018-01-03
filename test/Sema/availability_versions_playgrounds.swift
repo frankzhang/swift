@@ -1,13 +1,13 @@
 // Playgrounds
-// RUN: %target-parse-verify-swift -playground
+// RUN: %target-typecheck-verify-swift -playground
 
 // Immediate mode
-// RUN: %target-parse-verify-swift -interpret
+// RUN: %target-typecheck-verify-swift -interpret
 
 // REQUIRES: OS=macosx
 // REQUIRES: swift_interpreter
 
-@available(OSX, introduced=10.7, deprecated=10.8)
+@available(OSX, introduced: 10.7, deprecated: 10.8)
 func deprecatedOn10_8() { }
 
 func someFunction() {

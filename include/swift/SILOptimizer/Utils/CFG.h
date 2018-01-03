@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -115,6 +115,9 @@ SILBasicBlock *splitBasicBlockAndBranch(SILBuilder &B,
                                         SILInstruction *SplitBeforeInst,
                                         DominanceInfo *DT, SILLoopInfo *LI);
 
+/// \brief Return true if the function has a critical edge, false otherwise.
+bool hasCriticalEdges(SILFunction &F, bool OnlyNonCondBr);
+
 /// \brief Split all critical edges in the function updating the dominator tree
 /// and loop information (if they are not set to null). If \p OnlyNonCondBr is
 /// true this will not split cond_br edges (Only edges which can't carry
@@ -122,11 +125,52 @@ SILBasicBlock *splitBasicBlockAndBranch(SILBuilder &B,
 bool splitAllCriticalEdges(SILFunction &F, bool OnlyNonCondBr,
                            DominanceInfo *DT, SILLoopInfo *LI);
 
+/// \brief Split all cond_br critical edges with non-trivial arguments in the
+/// function updating the dominator tree and loop information (if they are not
+/// set to null).
+///
+/// A current invariant of Ownership SIL is that cond_br can only have critical
+/// edges with non-trivial arguments. This simplifies computation.
+bool splitAllCondBrCriticalEdgesWithNonTrivialArgs(SILFunction &Fn,
+                                                   DominanceInfo *DT,
+                                                   SILLoopInfo *LI);
+
 /// \brief Merge a basic block ending in a branch with its successor
 /// if possible. If dominance information or loop info is non null update it.
 /// Return true if block was merged.
 bool mergeBasicBlockWithSuccessor(SILBasicBlock *BB, DominanceInfo *DT,
                                   SILLoopInfo *LI);
 
-} // End namespace swift.
+/// Given a list of \p UserBlocks and a list of \p DefBlocks, find a set of
+/// blocks that together with \p UserBlocks joint-postdominate \p
+/// DefBlocks. This is in a sense finding a set of blocks that "complete" \p
+/// UserBlocks with respect to \p DefBlocks. As an example, for the following
+/// CFG:
+///
+///       +-----+
+///       | Def |
+///       +-----+
+///       |     |
+///       v     v
+/// +-----+     +-----+
+/// |     |     | Use |
+/// +-----+     +-----+
+///
+/// the completion of the joint post-dominance set would be the empty
+/// block. This has two main uses:
+///
+/// 1. This can tell you the places where if you were to sink the Def one would
+/// need to insert "compensating code".
+///
+/// 2. It can be used to prove ownership correctness of @owned values by
+/// asserting that the set of UserBlocks has an empty completion, implying they
+/// jointly-post dominate the def.
+///
+/// *NOTE* This completion may not be unique.
+void completeJointPostDominanceSet(
+    ArrayRef<SILBasicBlock *> UserBlocks, ArrayRef<SILBasicBlock *> DefBlocks,
+    llvm::SmallVectorImpl<SILBasicBlock *> &Completion);
+
+} // end namespace swift
+
 #endif

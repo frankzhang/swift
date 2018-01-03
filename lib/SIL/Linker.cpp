@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -17,6 +17,8 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Debug.h"
+#include "swift/AST/ProtocolConformance.h"
+#include "swift/SIL/FormalLinkage.h"
 #include <functional>
 
 using namespace swift;
@@ -25,35 +27,12 @@ using namespace Lowering;
 STATISTIC(NumFuncLinked, "Number of SIL functions linked");
 
 //===----------------------------------------------------------------------===//
-//                                  Utility
-//===----------------------------------------------------------------------===//
-
-/// \return True if the function \p F should be imported into the current
-/// module.
-static bool shouldImportFunction(SILFunction *F) {
-  // Skip functions that are marked with the 'no import' tag. These
-  // are functions that we don't want to copy from the module.
-  if (F->hasSemanticsAttr("stdlib_binary_only")) {
-    // If we are importing a function declaration mark it as external since we
-    // are not importing the body.
-    if (F->isExternalDeclaration())
-      F->setLinkage(SILLinkage::PublicExternal);
-    return false;
-  }
-
-  return true;
-}
-
-//===----------------------------------------------------------------------===//
 //                               Linker Helpers
 //===----------------------------------------------------------------------===//
 
 /// Process F, recursively deserializing any thing F may reference.
 bool SILLinkerVisitor::processFunction(SILFunction *F) {
   if (Mode == LinkingMode::LinkNone)
-    return false;
-
-  if (!shouldImportFunction(F))
     return false;
 
   // If F is a declaration, first deserialize it.
@@ -71,33 +50,6 @@ bool SILLinkerVisitor::processFunction(SILFunction *F) {
   // Try to transitively deserialize everything referenced by this
   // function.
   Worklist.push_back(F);
-  process();
-
-  // Since we successfully processed at least one function, return true.
-  return true;
-}
-
-/// Process Decl, recursively deserializing any thing Decl may reference.
-bool SILLinkerVisitor::processDeclRef(SILDeclRef Decl) {
-  if (Mode == LinkingMode::LinkNone)
-    return false;
-
-  // If F is a declaration, first deserialize it.
-  auto *NewFn =
-      isAvailableExternally(Decl.getLinkage(ForDefinition_t::NotForDefinition))
-          ? Loader->lookupSILFunction(Decl)
-          : nullptr;
-  if (!NewFn || NewFn->isExternalDeclaration())
-    return false;
-
-  if (!shouldImportFunction(NewFn)) {
-    return false;
-  }
-
-  ++NumFuncLinked;
-
-  // Try to transitively deserialize everything referenced by NewFn.
-  Worklist.push_back(NewFn);
   process();
 
   // Since we successfully processed at least one function, return true.
@@ -125,6 +77,27 @@ bool SILLinkerVisitor::processFunction(StringRef Name) {
   return true;
 }
 
+/// Process Decl, recursively deserializing any thing Decl may reference.
+SILFunction *SILLinkerVisitor::lookupFunction(StringRef Name,
+                                              SILLinkage Linkage) {
+
+  auto *NewFn = Loader->lookupSILFunction(Name, /* declarationOnly */ true,
+                                          Linkage);
+
+  if (!NewFn)
+    return nullptr;
+
+  assert(NewFn->isExternalDeclaration() &&
+         "SIL function lookup should never read function bodies");
+
+  return NewFn;
+}
+
+/// Process Decl, recursively deserializing any thing Decl may reference.
+bool SILLinkerVisitor::hasFunction(StringRef Name,
+                                   Optional<SILLinkage> Linkage) {
+  return Loader->hasSILFunction(Name, Linkage);
+}
 
 /// Deserialize the VTable mapped to C if it exists and all SIL the VTable
 /// transitively references.
@@ -145,7 +118,7 @@ SILVTable *SILLinkerVisitor::processClassDecl(const ClassDecl *C) {
   // Otherwise, add all the vtable functions in Vtbl to the function
   // processing list...
   for (auto &E : Vtbl->getEntries())
-    Worklist.push_back(E.second);
+    Worklist.push_back(E.Implementation);
 
   // And then transitively deserialize all SIL referenced by those functions.
   process();
@@ -168,9 +141,9 @@ bool SILLinkerVisitor::linkInVTable(ClassDecl *D) {
   // for processing.
   bool Result = false;
   for (auto P : Vtbl->getEntries()) {
-    if (P.second->isExternalDeclaration()) {
+    if (P.Implementation->isExternalDeclaration()) {
       Result = true;
-      addFunctionToWorklist(P.second);
+      addFunctionToWorklist(P.Implementation);
     }
   }
   return Result;
@@ -182,32 +155,31 @@ bool SILLinkerVisitor::linkInVTable(ClassDecl *D) {
 
 bool SILLinkerVisitor::visitApplyInst(ApplyInst *AI) {
   // Ok we have a function ref inst, grab the callee.
-  SILFunction *Callee = AI->getCalleeFunction();
+  SILFunction *Callee = AI->getReferencedFunction();
   if (!Callee)
     return false;
 
-  // If the linking mode is not link all, AI is not transparent, and the
-  // callee is not shared, we don't want to perform any linking.
-  if (!isLinkAll() && !Callee->isTransparent() &&
-      !hasSharedVisibility(Callee->getLinkage()))
-    return false;
+  if (isLinkAll() ||
+      hasSharedVisibility(Callee->getLinkage())) {
+    addFunctionToWorklist(Callee);
+    return true;
+  }
 
-  // Otherwise we want to try and link in the callee... Add it to the callee
-  // list and return true.
-  addFunctionToWorklist(Callee);
-  return true;
+  return false;
 }
 
 bool SILLinkerVisitor::visitPartialApplyInst(PartialApplyInst *PAI) {
-  SILFunction *Callee = PAI->getCalleeFunction();
+  SILFunction *Callee = PAI->getReferencedFunction();
   if (!Callee)
     return false;
-  if (!isLinkAll() && !Callee->isTransparent() &&
-      !hasSharedVisibility(Callee->getLinkage()))
-    return false;
 
-  addFunctionToWorklist(Callee);
-  return true;
+  if (isLinkAll() ||
+      hasSharedVisibility(Callee->getLinkage())) {
+    addFunctionToWorklist(Callee);
+    return true;
+  }
+
+  return false;
 }
 
 bool SILLinkerVisitor::visitFunctionRefInst(FunctionRefInst *FRI) {
@@ -215,12 +187,14 @@ bool SILLinkerVisitor::visitFunctionRefInst(FunctionRefInst *FRI) {
   // behind as dead code. This shouldn't happen, but if it does don't get into
   // an inconsistent state.
   SILFunction *Callee = FRI->getReferencedFunction();
-  if (!isLinkAll() && !Callee->isTransparent() &&
-      !hasSharedVisibility(Callee->getLinkage()))
-    return false;
 
-  addFunctionToWorklist(FRI->getReferencedFunction());
-  return true;
+  if (isLinkAll() ||
+      hasSharedVisibility(Callee->getLinkage())) {
+    addFunctionToWorklist(FRI->getReferencedFunction());
+    return true;
+  }
+
+  return false;
 }
 
 bool SILLinkerVisitor::visitProtocolConformance(
@@ -231,13 +205,13 @@ bool SILLinkerVisitor::visitProtocolConformance(
 
   // Otherwise try and lookup a witness table for C.
   auto C = ref.getConcrete();
-  SILWitnessTable *WT = Mod.lookUpWitnessTable(C).first;
+  SILWitnessTable *WT = Mod.lookUpWitnessTable(C);
 
   // If we don't find any witness table for the conformance, bail and return
   // false.
   if (!WT) {
     Mod.createWitnessTableDeclaration(
-        C, TypeConverter::getLinkageForProtocolConformance(
+        C, getLinkageForProtocolConformance(
                C->getRootNormalConformance(), NotForDefinition));
     return false;
   }
@@ -337,8 +311,12 @@ bool SILLinkerVisitor::process() {
   while (!Worklist.empty()) {
     auto *Fn = Worklist.pop_back_val();
 
-    if (!shouldImportFunction(Fn))
-      continue;
+    if (Fn->getModule().isSerialized()) {
+      // If the containing module has been serialized,
+      // Remove The Serialized state (if any)
+      //  This allows for more optimizations
+      Fn->setSerialized(IsSerialized_t::IsNotSerialized);
+    }
 
     DEBUG(llvm::dbgs() << "Process imports in function: "
                        << Fn->getName() << "\n");
@@ -348,9 +326,6 @@ bool SILLinkerVisitor::process() {
         // Should we try linking?
         if (visit(&I)) {
           for (auto *F : FunctionDeserializationWorklist) {
-
-            if (!shouldImportFunction(F))
-              continue;
 
             DEBUG(llvm::dbgs() << "Imported function: "
                                << F->getName() << "\n");

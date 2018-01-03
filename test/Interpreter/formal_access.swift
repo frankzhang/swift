@@ -1,4 +1,4 @@
-// RUN: %target-run-simple-swift | FileCheck %s
+// RUN: %target-run-simple-swift | %FileCheck %s
 // REQUIRES: executable_test
 
 class C: CustomStringConvertible {
@@ -15,7 +15,7 @@ print("1. global[0] == \(global[0])")
 // CHECK:      Begin
 // CHECK-NEXT: 1. global[0] == 1
 
-func doit(inout local: C) {
+func doit(_ local: inout C) {
   print("2. local == \(local)")
   print("2. global[0] == \(global[0])")
   // CHECK-NEXT: 2. local == 1

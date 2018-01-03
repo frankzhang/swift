@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -emit-sil -disable-objc-attr-requires-foundation-module -verify %s
+// RUN: %target-swift-frontend -emit-sil -enable-sil-ownership -disable-objc-attr-requires-foundation-module -verify %s
 
 // High-level tests that DI rejects certain invalid idioms for early
 // return from initializers.
@@ -18,13 +18,13 @@ final class DerivedClass : BaseClass {
   }
 }
 
-func something(x: Int) {}
+func something(_ x: Int) {}
 
-func something(inout x: Int) {}
+func something(_ x: inout Int) {}
 
-func something(x: AnyObject) {}
+func something(_ x: AnyObject) {}
 
-func something(x: Any.Type) {}
+func something(_ x: Any.Type) {}
 
 // <rdar://problem/22946400> DI needs to diagnose self usages in error block
 //
@@ -51,11 +51,60 @@ class ErrantClass : ErrantBaseClass {
     } catch {}
   } // expected-error {{'self' used inside 'catch' block reachable from super.init call}}
 
+  init(invalidEscapeDesignated2: ()) throws {
+    x = 10
+    y = 10
+    do {
+      try super.init()
+    } catch {
+      try super.init() // expected-error {{'self' used inside 'catch' block reachable from super.init call}}
+    }
+  }
+
+  init(invalidEscapeDesignated3: ()) {
+    x = 10
+    y = 10
+    do {
+      try super.init()
+    } catch {
+      print(self.x) // expected-error {{'self' used inside 'catch' block reachable from super.init call}}
+      self.y = 20 // expected-error {{'self' used inside 'catch' block reachable from super.init call}}
+    }
+  } // expected-error {{'self' used inside 'catch' block reachable from super.init call}}
+
+  init(invalidEscapeDesignated4: ()) throws {
+    x = 10
+    y = 10
+    do {
+      try super.init()
+    } catch let e {
+      print(self.x) // expected-error {{'self' used inside 'catch' block reachable from super.init call}}
+      throw e
+    }
+  }
+
   convenience init(invalidEscapeConvenience: ()) {
     do {
       try self.init()
     } catch {}
   } // expected-error {{'self' used inside 'catch' block reachable from self.init call}}
+
+  convenience init(invalidEscapeConvenience2: ()) throws {
+    do {
+      try self.init()
+    } catch {
+      try self.init() // expected-error {{'self' used inside 'catch' block reachable from self.init call}}
+    }
+  }
+
+  convenience init(invalidEscapeConvenience3: ()) throws {
+    do {
+      try self.init()
+    } catch let e {
+      print(self) // expected-error {{'self' used inside 'catch' block reachable from self.init call}}
+      throw e
+    }
+  }
 
   init(noEscapeDesignated: ()) throws {
     x = 10
@@ -91,7 +140,7 @@ class ErrantClass : ErrantBaseClass {
       something(self) // expected-error {{'self' used inside 'catch' block reachable from self.init call}}
 
       // FIXME: not diagnosed
-      something(self.dynamicType)
+      something(type(of: self))
 
       throw e
     }

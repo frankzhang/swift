@@ -1,30 +1,36 @@
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_1 | FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_1
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_1P | FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_1P
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_2 | FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_2
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_2P | FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_2P
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_1 | %FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_1P | %FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_1P
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_2 | %FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_2
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=IMPLICIT_CONSTRUCTORS_2P | %FileCheck %s -check-prefix=IMPLICIT_CONSTRUCTORS_2P
 
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_1 | FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_1
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_1P | FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_1P
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_1 | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_1P | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_1P
 
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_2 | FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_2
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_2P | FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_2P
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_2 | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_2
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_2P | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_2P
 
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_3P | FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_3P
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_3P | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_3P
 
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_SELECTOR_1 | FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_SELECTOR_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_SELECTOR_1 | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_SELECTOR_1
 
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_BASE_DERIVED_1 | FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_BASE_DERIVED_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=EXPLICIT_CONSTRUCTORS_BASE_DERIVED_1 | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_BASE_DERIVED_1
 
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE1 | FileCheck %s -check-prefix=INIT_FROM_METATYPE1
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE2 | FileCheck %s -check-prefix=INIT_FROM_METATYPE2
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE3 | FileCheck %s -check-prefix=INIT_FROM_METATYPE3
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE4 | FileCheck %s -check-prefix=INIT_FROM_METATYPE4
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE5 | FileCheck %s -check-prefix=INIT_FROM_METATYPE4
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE6 | FileCheck %s -check-prefix=INIT_FROM_METATYPE6
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE1 | %FileCheck %s -check-prefix=INIT_FROM_METATYPE1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE2 | %FileCheck %s -check-prefix=INIT_FROM_METATYPE2
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE3 | %FileCheck %s -check-prefix=INIT_FROM_METATYPE3
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE4 | %FileCheck %s -check-prefix=INIT_FROM_METATYPE4
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE5 | %FileCheck %s -check-prefix=INIT_FROM_METATYPE4
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=INIT_FROM_METATYPE6 | %FileCheck %s -check-prefix=INIT_FROM_METATYPE6
 
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=HAVE_RPAREN_1 | FileCheck %s -check-prefix=HAVE_RPAREN_1
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=HAVE_RPAREN_2 | FileCheck %s -check-prefix=HAVE_RPAREN_2
-// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=HAVE_COMMA_1 | FileCheck %s -check-prefix=HAVE_COMMA_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=HAVE_RPAREN_1 | %FileCheck %s -check-prefix=HAVE_RPAREN_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=HAVE_RPAREN_2 | %FileCheck %s -check-prefix=HAVE_RPAREN_2
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=HAVE_COMMA_1 -code-complete-call-pattern-heuristics | %FileCheck %s -check-prefix=HAVE_COMMA_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=HAVE_COMMA_1 | %FileCheck %s -check-prefix=EXPLICIT_CONSTRUCTORS_1P
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=WITH_ALIAS_1 | %FileCheck %s -check-prefix=WITH_ALIAS_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=CLOSURE_IN_INIT_1 | %FileCheck %s -check-prefix=CLOSURE_IN_INIT_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=CLOSURE_IN_INIT_2 | %FileCheck %s -check-prefix=CLOSURE_IN_INIT_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=CLOSURE_IN_INIT_3 | %FileCheck %s -check-prefix=CLOSURE_IN_INIT_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=CLOSURE_IN_INIT_4 | %FileCheck %s -check-prefix=CLOSURE_IN_INIT_1
 
 func freeFunc() {}
 
@@ -43,9 +49,7 @@ func testImplicitConstructors1() {
 }
 func testImplicitConstructors1P() {
   ImplicitConstructors1(#^IMPLICIT_CONSTRUCTORS_1P^#
-// IMPLICIT_CONSTRUCTORS_1P: Begin completions
-// IMPLICIT_CONSTRUCTORS_1P-NEXT: Decl[Constructor]/CurrNominal: ['('])[#ImplicitConstructors1#]{{; name=.+$}}
-// IMPLICIT_CONSTRUCTORS_1P-NEXT: End completions
+// IMPLICIT_CONSTRUCTORS_1P-NOT: Begin completions
 }
 
 struct ImplicitConstructors2 {
@@ -62,8 +66,7 @@ func testImplicitConstructors2() {
 func testImplicitConstructors2P() {
   ImplicitConstructors2(#^IMPLICIT_CONSTRUCTORS_2P^#
 // IMPLICIT_CONSTRUCTORS_2P: Begin completions
-// IMPLICIT_CONSTRUCTORS_2P-NEXT: Decl[Constructor]/CurrNominal: ['(']{#instanceVar: Int#})[#ImplicitConstructors2#]{{; name=.+$}}
-// IMPLICIT_CONSTRUCTORS_2P-NEXT: Decl[Constructor]/CurrNominal: ['('])[#ImplicitConstructors2#]{{; name=.+$}}
+// IMPLICIT_CONSTRUCTORS_2P-NEXT: Decl[Constructor]/CurrNominal: ['(']{#instanceVar: Int#}[')'][#ImplicitConstructors2#]{{; name=.+$}}
 // IMPLICIT_CONSTRUCTORS_2P-NEXT: End completions
 }
 
@@ -84,9 +87,8 @@ func testExplicitConstructors1() {
 func testExplicitConstructors1P() {
   ExplicitConstructors1(#^EXPLICIT_CONSTRUCTORS_1P^#
 // EXPLICIT_CONSTRUCTORS_1P: Begin completions
-// EXPLICIT_CONSTRUCTORS_1P-NEXT: Decl[Constructor]/CurrNominal: ['('])[#ExplicitConstructors1#]{{; name=.+$}}
-// EXPLICIT_CONSTRUCTORS_1P-NEXT: Decl[Constructor]/CurrNominal: ['(']{#a: Int#})[#ExplicitConstructors1#]{{; name=.+$}}
-// EXPLICIT_CONSTRUCTORS_1P-NEXT: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}, {#b: Float#})[#ExplicitConstructors1#]{{; name=.+$}}
+// EXPLICIT_CONSTRUCTORS_1P-NEXT: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}[')'][#ExplicitConstructors1#]{{; name=.+$}}
+// EXPLICIT_CONSTRUCTORS_1P-NEXT: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}, {#b: Float#}[')'][#ExplicitConstructors1#]{{; name=.+$}}
 // EXPLICIT_CONSTRUCTORS_1P-NEXT: End completions
 }
 
@@ -101,9 +103,8 @@ ExplicitConstructors1#^EXPLICIT_CONSTRUCTORS_2^#
 ExplicitConstructors1(#^EXPLICIT_CONSTRUCTORS_2P^#
 
 // EXPLICIT_CONSTRUCTORS_2P: Begin completions
-// EXPLICIT_CONSTRUCTORS_2P-DAG: Decl[Constructor]/CurrNominal: ['('])[#ExplicitConstructors1#]
-// EXPLICIT_CONSTRUCTORS_2P-DAG: Decl[Constructor]/CurrNominal: ['(']{#a: Int#})[#ExplicitConstructors1#]
-// EXPLICIT_CONSTRUCTORS_2P-DAG: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}, {#b: Float#})[#ExplicitConstructors1#]
+// EXPLICIT_CONSTRUCTORS_2P-DAG: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}[')'][#ExplicitConstructors1#]
+// EXPLICIT_CONSTRUCTORS_2P-DAG: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}, {#b: Float#}[')'][#ExplicitConstructors1#]
 // EXPLICIT_CONSTRUCTORS_2P: End completions
 
 
@@ -116,10 +117,9 @@ struct ExplicitConstructors3 {
 func testExplicitConstructors3P() {
   ExplicitConstructors3(#^EXPLICIT_CONSTRUCTORS_3P^#
 // EXPLICIT_CONSTRUCTORS_3P: Begin completions
-// EXPLICIT_CONSTRUCTORS_3P-DAG: Decl[Constructor]/CurrNominal: ['('])[#ExplicitConstructors3#]{{; name=.+$}}
-// EXPLICIT_CONSTRUCTORS_3P-DAG: Decl[Constructor]/CurrNominal: ['(']{#(a): Int#})[#ExplicitConstructors3#]{{; name=.+$}}
-// EXPLICIT_CONSTRUCTORS_3P-DAG: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}, {#b: Float#})[#ExplicitConstructors3#]{{; name=.+$}}
-// EXPLICIT_CONSTRUCTORS_3P-DAG: Decl[FreeFunction]/CurrModule/TypeRelation[Invalid]: freeFunc()[#Void#]{{; name=.+$}}
+// EXPLICIT_CONSTRUCTORS_3P-DAG: Decl[Constructor]/CurrNominal: ['(']{#(a): Int#}[')'][#ExplicitConstructors3#]{{; name=.+$}}
+// EXPLICIT_CONSTRUCTORS_3P-DAG: Decl[Constructor]/CurrNominal: ['(']{#a: Int#}, {#b: Float#}[')'][#ExplicitConstructors3#]{{; name=.+$}}
+// EXPLICIT_CONSTRUCTORS_3P-DAG: Decl[FreeFunction]/CurrModule/NotRecommended/TypeRelation[Invalid]: freeFunc()[#Void#]{{; name=.+$}}
 // EXPLICIT_CONSTRUCTORS_3P: End completions
 }
 
@@ -198,14 +198,14 @@ func testGetInitFromMetatype2() {
 
 func testGetInitFromMetatype3() {
   var SS = ExplicitConstructorsBase1.self
-  SS.dynamicType.#^INIT_FROM_METATYPE3^#
+  type(of: SS).#^INIT_FROM_METATYPE3^#
 }
 
 // INIT_FROM_METATYPE3-NOT: Decl[Constructor]/CurrNominal:      init()[#ExplicitConstructorsBase1#]{{; name=.+$}}
 
 func testGetInitFromMetatype4() {
   var a = ExplicitConstructorsDerived2()
-  a.dynamicType.#^INIT_FROM_METATYPE4^#
+  type(of: a).#^INIT_FROM_METATYPE4^#
 }
 
 // INIT_FROM_METATYPE4: Decl[Constructor]/CurrNominal: init({#a: Int#})[#ExplicitConstructorsDerived2#]; name=init(a: Int)
@@ -236,4 +236,31 @@ func testHaveRParen2() {
 func testHaveComma1() {
   ExplicitConstructors1(#^HAVE_COMMA_1^#,
 // HAVE_COMMA_1-NOT: Decl[Constructor]
+}
+
+class WithAlias1 {
+  init(busted: B) {}
+  init(working: Int) {}
+}
+typealias Alias1 = WithAlias1
+func testWithAlias1() {
+  Alias1#^WITH_ALIAS_1^#
+}
+// WITH_ALIAS_1: Decl[Constructor]/CurrNominal:      ({#working: Int#})[#Alias1#];
+
+struct ClosureInInit1 {
+  struct S {init(_: Int) {}}
+  var prop1: S = {
+    return S(#^CLOSURE_IN_INIT_1^#
+  }
+// CLOSURE_IN_INIT_1: Decl[Constructor]/CurrNominal:      ['(']{#Int#}[')'][#ClosureInInit1.S#];
+  var prop2: S = {
+    return S(#^CLOSURE_IN_INIT_2^#
+  }()
+  var prop3: S = {
+    S(#^CLOSURE_IN_INIT_3^#
+  }
+  var prop3: S = {
+    S(#^CLOSURE_IN_INIT_4^#
+  }()
 }

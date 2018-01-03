@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -15,6 +15,8 @@
 #include "swift/SILOptimizer/PassManager/Transforms.h"
 #include "swift/SILOptimizer/Analysis/RCIdentityAnalysis.h"
 #include "swift/SIL/SILBuilder.h"
+#include "swift/AST/GenericSignature.h"
+#include "swift/AST/SubstitutionMap.h"
 #include "llvm/ADT/Statistic.h"
 
 STATISTIC(NumReleasesDevirtualized, "Number of devirtualized releases");
@@ -24,6 +26,7 @@ using namespace swift;
 namespace {
 
 /// Devirtualizes release instructions which are known to destruct the object.
+///
 /// This means, it replaces a sequence of
 ///    %x = alloc_ref [stack] $X
 ///      ...
@@ -32,13 +35,10 @@ namespace {
 /// with
 ///    %x = alloc_ref [stack] $X
 ///      ...
-///    %d = function_ref @deinit_of_X
+///    set_deallocating %x
+///    %d = function_ref @dealloc_of_X
 ///    %a = apply %d(%x)
 ///    dealloc_ref [stack] %x
-///
-/// It also works for array buffers, where the allocation/deallocation is done
-/// by calls to the swift_bufferAllocateOnStack/swift_bufferDeallocateFromStack
-/// functions.
 ///
 /// The optimization is only done for stack promoted objects because they are
 /// known to have no associated objects (which are not explicitly released
@@ -56,16 +56,10 @@ private:
   bool devirtualizeReleaseOfObject(SILInstruction *ReleaseInst,
                                    DeallocRefInst *DeallocInst);
 
-  /// Devirtualize releases of swift objects.
-  bool devirtualizeReleaseOfBuffer(SILInstruction *ReleaseInst,
-                                   ApplyInst *DeallocCall);
-
   /// Replace the release-instruction \p ReleaseInst with an explicit call to
-  /// the destructor of \p AllocType for \p object.
-  bool createDeinitCall(SILType AllocType, SILInstruction *ReleaseInst,
-                        SILValue object);
-
-  StringRef getName() override { return "Release Devirtualizer"; }
+  /// the deallocating destructor of \p AllocType for \p object.
+  bool createDeallocCall(SILType AllocType, SILInstruction *ReleaseInst,
+                         SILValue object);
 
   RCIdentityFunctionInfo *RCIA = nullptr;
 };
@@ -87,11 +81,6 @@ void ReleaseDevirtualizer::run() {
       if (LastRelease) {
         if (auto *DRI = dyn_cast<DeallocRefInst>(&I)) {
           Changed |= devirtualizeReleaseOfObject(LastRelease, DRI);
-          LastRelease = nullptr;
-          continue;
-        }
-        if (auto *AI = dyn_cast<ApplyInst>(&I)) {
-          Changed |= devirtualizeReleaseOfBuffer(LastRelease, AI);
           LastRelease = nullptr;
           continue;
         }
@@ -125,7 +114,7 @@ devirtualizeReleaseOfObject(SILInstruction *ReleaseInst,
     return false;
 
   // Is the dealloc_ref paired with an alloc_ref?
-  AllocRefInst *ARI = dyn_cast<AllocRefInst>(DeallocInst->getOperand());
+  auto *ARI = dyn_cast<AllocRefInst>(DeallocInst->getOperand());
   if (!ARI)
     return false;
 
@@ -135,92 +124,50 @@ devirtualizeReleaseOfObject(SILInstruction *ReleaseInst,
     return false;
 
   SILType AllocType = ARI->getType();
-  return createDeinitCall(AllocType, ReleaseInst, ARI);
+  return createDeallocCall(AllocType, ReleaseInst, ARI);
 }
 
-bool ReleaseDevirtualizer::
-devirtualizeReleaseOfBuffer(SILInstruction *ReleaseInst,
-                            ApplyInst *DeallocCall) {
-
-  DEBUG(llvm::dbgs() << "  try to devirtualize " << *ReleaseInst);
-
-  // Is this a deallocation of a buffer?
-  SILFunction *DeallocFn = DeallocCall->getCalleeFunction();
-  if (!DeallocFn || DeallocFn->getName() != "swift_bufferDeallocateFromStack")
-    return false;
-
-  // Is the deallocation call paired with an allocation call?
-  ApplyInst *AllocAI = dyn_cast<ApplyInst>(DeallocCall->getArgument(0));
-  if (!AllocAI || AllocAI->getNumArguments() < 1)
-    return false;
-
-  SILFunction *AllocFunc = AllocAI->getCalleeFunction();
-  if (!AllocFunc || AllocFunc->getName() != "swift_bufferAllocateOnStack")
-    return false;
-
-  // Can we find the buffer type which is allocated? It's metatype is passed
-  // as first argument to the allocation function.
-  auto *IEMTI = dyn_cast<InitExistentialMetatypeInst>(AllocAI->getArgument(0));
-  if (!IEMTI)
-    return false;
-
-  SILType MType = IEMTI->getOperand()->getType();
-  auto *MetaType = MType.getSwiftRValueType()->getAs<AnyMetatypeType>();
-  if (!MetaType)
-    return false;
-
-  // Is the allocated buffer a class type? This should always be the case.
-  auto *ClType = MetaType->getInstanceType()->getAs<BoundGenericClassType>();
-  if (!ClType)
-    return false;
-
-  // Does the last release really release the allocated buffer?
-  SILValue rcRoot = RCIA->getRCIdentityRoot(ReleaseInst->getOperand(0));
-  if (rcRoot != AllocAI)
-    return false;
-
-  SILType SILClType = SILType::getPrimitiveObjectType(CanType(ClType));
-  return createDeinitCall(SILClType, ReleaseInst, AllocAI);
-}
-
-bool ReleaseDevirtualizer::createDeinitCall(SILType AllocType,
+bool ReleaseDevirtualizer::createDeallocCall(SILType AllocType,
                                             SILInstruction *ReleaseInst,
                                             SILValue object) {
-  DEBUG(llvm::dbgs() << "  create deinit call\n");
+  DEBUG(llvm::dbgs() << "  create dealloc call\n");
 
   ClassDecl *Cl = AllocType.getClassOrBoundGenericClass();
   assert(Cl && "no class type allocated with alloc_ref");
 
   // Find the destructor of the type.
   DestructorDecl *Destructor = Cl->getDestructor();
-  SILDeclRef DeinitRef(Destructor, SILDeclRef::Kind::Destroyer);
+  SILDeclRef DeallocRef(Destructor, SILDeclRef::Kind::Deallocator);
   SILModule &M = ReleaseInst->getFunction()->getModule();
-  SILFunction *Deinit = M.lookUpFunction(DeinitRef);
-  if (!Deinit)
+  SILFunction *Dealloc = M.lookUpFunction(DeallocRef);
+  if (!Dealloc)
     return false;
 
-  CanSILFunctionType DeinitType = Deinit->getLoweredFunctionType();
-  ArrayRef<Substitution> AllocSubsts = AllocType.gatherAllSubstitutions(M);
+  CanSILFunctionType DeallocType = Dealloc->getLoweredFunctionType();
+  auto *NTD = AllocType.getSwiftRValueType()->getAnyNominal();
+  auto AllocSubMap = AllocType.getSwiftRValueType()
+    ->getContextSubstitutionMap(M.getSwiftModule(), NTD);
 
-  assert(!AllocSubsts.empty() == DeinitType->isPolymorphic() &&
-         "deinit of generic class is not polymorphic or vice versa");
-
-  if (DeinitType->isPolymorphic())
-    DeinitType = DeinitType->substGenericArgs(M, M.getSwiftModule(),
-                                              AllocSubsts);
-
-  SILType ReturnType = DeinitType->getResult().getSILType();
-  SILType DeinitSILType = SILType::getPrimitiveObjectType(DeinitType);
+  DeallocType = DeallocType->substGenericArgs(M, AllocSubMap);
 
   SILBuilder B(ReleaseInst);
   if (object->getType() != AllocType)
     object = B.createUncheckedRefCast(ReleaseInst->getLoc(), object, AllocType);
 
+  // Do what a release would do before calling the deallocator: set the object
+  // in deallocating state, which means set the RC_DEALLOCATING_FLAG flag.
+  B.createSetDeallocating(ReleaseInst->getLoc(), object,
+                          cast<RefCountingInst>(ReleaseInst)->getAtomicity());
+
   // Create the call to the destructor with the allocated object as self
   // argument.
-  auto *MI = B.createFunctionRef(ReleaseInst->getLoc(), Deinit);
-  B.createApply(ReleaseInst->getLoc(), MI, DeinitSILType, ReturnType,
-                AllocSubsts, { object }, false);
+  auto *MI = B.createFunctionRef(ReleaseInst->getLoc(), Dealloc);
+
+  SmallVector<Substitution, 4> AllocSubsts;
+  if (auto *Sig = NTD->getGenericSignature())
+    Sig->getSubstitutions(AllocSubMap, AllocSubsts);
+
+  B.createApply(ReleaseInst->getLoc(), MI, AllocSubsts, {object}, false);
 
   NumReleasesDevirtualized++;
   ReleaseInst->eraseFromParent();

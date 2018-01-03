@@ -61,14 +61,18 @@ SWIFT_NAME(SomeProtocol)
 -(instancetype)initWithTitle:(const char *)title delegate:(id)delegate cancelButtonTitle:(const char *)cancelButtonTitle destructiveButtonTitle:(const char *)destructiveButtonTitle otherButtonTitles:(const char *)otherButtonTitles, ...;
 @end
 
-@interface NSError : NSObject
-@end
-
 @interface NSErrorImports : NSObject
 - (nullable NSObject *)methodAndReturnError:(NSError **)error;
 - (BOOL)methodWithFloat:(float)value error:(NSError **)error;
+- (nullable void *)pointerMethodAndReturnError:(NSError **)error;
+- (nullable SEL)selectorMethodAndReturnError:(NSError **)error;
+- (nullable void (*)(void))functionPointerMethodAndReturnError:(NSError **)error;
+- (nullable void (^)(void))blockMethodAndReturnError:(NSError **)error;
+
 - (nullable instancetype)initAndReturnError:(NSError **)error;
 - (nullable instancetype)initWithFloat:(float)value error:(NSError **)error;
+
+- (nonnull void *)badPointerMethodAndReturnError:(NSError **)error;
 @end
 
 typedef const void *CFTypeRef __attribute__((objc_bridge(id)));

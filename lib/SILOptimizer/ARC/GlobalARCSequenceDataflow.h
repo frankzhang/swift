@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -54,21 +54,26 @@ private:
   /// releasing this value one is affecting.
   RCIdentityFunctionInfo *RCIA;
 
+  /// An analysis to get the epilogue ARC instructions. 
+  EpilogueARCFunctionInfo *EAFI;
+
   /// The map from dataflow terminating decrements -> increment dataflow state.
   BlotMapVector<SILInstruction *, TopDownRefCountState> &DecToIncStateMap;
 
   /// The map from dataflow terminating increment -> decrement dataflow state.
   BlotMapVector<SILInstruction *, BottomUpRefCountState> &IncToDecStateMap;
 
+  llvm::BumpPtrAllocator Allocator;
+  ImmutablePointerSetFactory<SILInstruction> SetFactory;
+
   /// Stashed BB information.
   ARCBBStateInfo *BBStateInfo;
-
-  ConsumedArgToEpilogueReleaseMatcher ConsumedArgToReleaseMap;
 
 public:
   ARCSequenceDataflowEvaluator(
       SILFunction &F, AliasAnalysis *AA, PostOrderAnalysis *POA,
-      RCIdentityFunctionInfo *RCIA, ProgramTerminationFunctionInfo *PTFI,
+      RCIdentityFunctionInfo *RCIA, EpilogueARCFunctionInfo *EAFI,
+      ProgramTerminationFunctionInfo *PTFI,
       BlotMapVector<SILInstruction *, TopDownRefCountState> &DecToIncStateMap,
       BlotMapVector<SILInstruction *, BottomUpRefCountState> &IncToDecStateMap);
   ~ARCSequenceDataflowEvaluator();
@@ -98,7 +103,7 @@ private:
 
   bool processBBBottomUp(ARCBBState &BBState,
                          bool FreezeOwnedArgEpilogueReleases);
-
+  bool processBBTopDown(ARCBBState &BBState);
   void computePostDominatingConsumedArgMap();
 
   llvm::Optional<ARCBBStateInfoHandle> getBottomUpBBState(SILBasicBlock *BB);

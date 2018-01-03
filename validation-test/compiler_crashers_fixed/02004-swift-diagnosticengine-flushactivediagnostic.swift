@@ -1,9 +1,11 @@
-// RUN: not %target-swift-frontend %s -parse
+// This source file is part of the Swift.org open source project
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
-// Distributed under the terms of the MIT license
-// Test case submitted to project by https://github.com/practicalswift (practicalswift)
-// Test case found by fuzzing
-
+// RUN: not %target-swift-frontend %s -typecheck
 return m() {
 get {
 }
@@ -20,7 +22,7 @@ typealias B<1 {
 typealias B : b: (false)() {
 }
 let b = Int) -> {
-case c>(Any, g : CollectionType where T> (g, end: 1, AnyObject.C: Any] {
+case c>(Any, g : Collection where T> (g, end: 1, AnyObject.C: Any] {
 struct c {
 a")
 }

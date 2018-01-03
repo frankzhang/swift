@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -46,7 +46,7 @@ FuzzyStringMatcher::FuzzyStringMatcher(StringRef pattern_)
                pattern.size() * pattern.size(); // max run length score
     if (upperCharCount)                         // max uppercase match score
       maxScore += (upperCharCount + 1) * (upperCharCount + 1);
-    maxScore *= 1.1; // exact match bonus
+    maxScore *= 1.1 * 2.5; // exact prefix match bonus
   }
 }
 
@@ -500,6 +500,10 @@ CandidateSpecificMatcher::scoreCandidateTrial(unsigned firstPatternPos) {
       runs[0].location == 0) {
     trialScore *= 1.1;
   }
+
+  // Exact prefix matches are the best.
+  if (!runs.empty() && runs[0].location == 0 && runs[0].length == patternLength)
+    trialScore *= 2.5;
 
   // FIXME: popular/unpopular API.
 

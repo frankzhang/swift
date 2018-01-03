@@ -1,7 +1,7 @@
 import has_accessibility
 
-public let a = 0
-internal let b = 0
+public let a = 0 // expected-note * {{did you mean 'a'?}}
+internal let b = 0 // expected-note * {{did you mean 'b'?}}
 private let c = 0
 
 extension Foo {
@@ -11,7 +11,7 @@ extension Foo {
 }
 
 struct PrivateInit {
-  private init() {}  // expected-note {{'init' declared here}}
+  private init() {}  // expected-note {{'init()' declared here}}
 }
 
 extension Foo {

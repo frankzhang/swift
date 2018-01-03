@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -emit-object -O %s
+// RUN: %target-swift-frontend -assume-parsing-unqualified-ownership-sil -emit-object -O %s
 
 // This is a compile-only test. It checks that the compiler does not crash for
 // a (not executed) bitcast with different sizes. This appears in the
@@ -9,13 +9,13 @@
 public func myDictionaryBridge<
     SrcType, DestType
 >(
-    source: Dictionary<SrcType, Int>, _ keyBridgesDirectly : Bool
+    _ source: Dictionary<SrcType, Int>, _ keyBridgesDirectly : Bool
 ) -> DestType? {
 
   for (key, value) in source {
     if keyBridgesDirectly {
-      var bridgedKey = unsafeBitCast(key, DestType.self)
-	  return bridgedKey
+      var bridgedKey = unsafeBitCast(key, to: DestType.self)
+      return bridgedKey
     }
   }
   return nil

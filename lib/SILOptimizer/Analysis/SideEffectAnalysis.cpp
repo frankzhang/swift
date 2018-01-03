@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -66,16 +66,22 @@ bool FunctionEffects::mergeFrom(const FunctionEffects &RHS) {
 
 bool FunctionEffects::mergeFromApply(
                   const FunctionEffects &ApplyEffects, FullApplySite FAS) {
+  return mergeFromApply(ApplyEffects, FAS.getInstruction());
+}
+
+bool FunctionEffects::mergeFromApply(
+                  const FunctionEffects &ApplyEffects, SILInstruction *AS) {
   bool Changed = mergeFlags(ApplyEffects);
   Changed |= GlobalEffects.mergeFrom(ApplyEffects.GlobalEffects);
-  unsigned numCallerArgs = FAS.getNumArguments();
+  auto FAS = FullApplySite::isa(AS);
+  unsigned numCallerArgs = FAS ? FAS.getNumArguments() : 1;
   unsigned numCalleeArgs = ApplyEffects.ParamEffects.size();
   assert(numCalleeArgs >= numCallerArgs);
   for (unsigned Idx = 0; Idx < numCalleeArgs; Idx++) {
     // Map the callee argument effects to parameters of this function.
     // If there are more callee parameters than arguments it means that the
     // callee is the result of a partial_apply.
-    Effects *E = (Idx < numCallerArgs ? getEffectsOn(FAS.getArgument(Idx)) :
+    Effects *E = (Idx < numCallerArgs ? getEffectsOn(FAS ? FAS.getArgument(Idx) : AS->getOperand(Idx)) :
                   &GlobalEffects);
     Changed |= E->mergeFrom(ApplyEffects.ParamEffects[Idx]);
   }
@@ -94,10 +100,11 @@ static SILValue skipAddrProjections(SILValue V) {
       case ValueKind::StructElementAddrInst:
       case ValueKind::TupleElementAddrInst:
       case ValueKind::RefElementAddrInst:
+      case ValueKind::RefTailAddrInst:
       case ValueKind::ProjectBoxInst:
       case ValueKind::UncheckedTakeEnumDataAddrInst:
       case ValueKind::PointerToAddressInst:
-        V = cast<SILInstruction>(V)->getOperand(0);
+        V = cast<SingleValueInstruction>(V)->getOperand(0);
         break;
       default:
         return V;
@@ -113,7 +120,7 @@ static SILValue skipValueProjections(SILValue V) {
       case ValueKind::TupleExtractInst:
       case ValueKind::UncheckedEnumDataInst:
       case ValueKind::UncheckedTrivialBitCastInst:
-        V = cast<SILInstruction>(V)->getOperand(0);
+        V = cast<SingleValueInstruction>(V)->getOperand(0);
         break;
       default:
         return V;
@@ -125,13 +132,11 @@ static SILValue skipValueProjections(SILValue V) {
 Effects *FunctionEffects::getEffectsOn(SILValue Addr) {
   SILValue BaseAddr = skipValueProjections(skipAddrProjections(Addr));
   switch (BaseAddr->getKind()) {
-    case swift::ValueKind::SILArgument: {
-      // Can we associate the address to a function parameter?
-      SILArgument *Arg = cast<SILArgument>(BaseAddr);
-      if (Arg->isFunctionArg()) {
-        return &ParamEffects[Arg->getIndex()];
-      }
-      break;
+  case swift::ValueKind::SILFunctionArgument: {
+    // Can we associate the address to a function parameter?
+    auto *Arg = cast<SILFunctionArgument>(BaseAddr);
+    return &ParamEffects[Arg->getIndex()];
+    break;
     }
     case ValueKind::AllocStackInst:
     case ValueKind::AllocRefInst:
@@ -148,7 +153,7 @@ Effects *FunctionEffects::getEffectsOn(SILValue Addr) {
 
 bool SideEffectAnalysis::getDefinedEffects(FunctionEffects &Effects,
                                            SILFunction *F) {
-  if (F->getLoweredFunctionType()->isNoReturn()) {
+  if (F->hasSemanticsAttr("arc.programtermination_point")) {
     Effects.Traps = true;
     return true;
   }
@@ -203,8 +208,12 @@ bool SideEffectAnalysis::getSemanticEffects(FunctionEffects &FE,
       if (!ASC.mayHaveBridgedObjectElementType()) {
         SelfEffects.Reads = true;
         SelfEffects.Releases |= !ASC.hasGuaranteedSelf();
-        if (((ApplyInst *)ASC)->getOrigCalleeType()->hasIndirectResult())
-          FE.ParamEffects[0].Writes = true;
+        for (auto i : range(((ApplyInst *)ASC)
+                                ->getOrigCalleeConv()
+                                .getNumIndirectSILResults())) {
+          assert(!ASC.hasGetElementDirectResult());
+          FE.ParamEffects[i].Writes = true;
+        }
         return true;
       }
       return false;
@@ -276,16 +285,18 @@ void SideEffectAnalysis::analyzeInstruction(FunctionInfo *FInfo,
                                             int RecursionDepth) {
   if (FullApplySite FAS = FullApplySite::isa(I)) {
     // Is this a call to a semantics function?
-    ArraySemanticsCall ASC(I);
-    if (ASC && ASC.hasSelf()) {
-      FunctionEffects ApplyEffects(FAS.getNumArguments());
-      if (getSemanticEffects(ApplyEffects, ASC)) {
-        FInfo->FE.mergeFromApply(ApplyEffects, FAS);
-        return;
+    if (auto apply = dyn_cast<ApplyInst>(FAS.getInstruction())) {
+      ArraySemanticsCall ASC(apply);
+      if (ASC && ASC.hasSelf()) {
+        FunctionEffects ApplyEffects(FAS.getNumArguments());
+        if (getSemanticEffects(ApplyEffects, ASC)) {
+          FInfo->FE.mergeFromApply(ApplyEffects, FAS);
+          return;
+        }
       }
     }
 
-    if (SILFunction *SingleCallee = FAS.getCalleeFunction()) {
+    if (SILFunction *SingleCallee = FAS.getReferencedFunction()) {
       // Does the function have any @effects?
       if (getDefinedEffects(FInfo->FE, SingleCallee))
         return;
@@ -317,56 +328,78 @@ void SideEffectAnalysis::analyzeInstruction(FunctionInfo *FInfo,
   }
   // Handle some kind of instructions specially.
   switch (I->getKind()) {
-    case ValueKind::FixLifetimeInst:
+    case SILInstructionKind::FixLifetimeInst:
       // A fix_lifetime instruction acts like a read on the operand. Retains can move after it
       // but the last release can't move before it.
       FInfo->FE.getEffectsOn(I->getOperand(0))->Reads = true;
       return;
-    case ValueKind::AllocStackInst:
-    case ValueKind::DeallocStackInst:
+    case SILInstructionKind::AllocStackInst:
+    case SILInstructionKind::DeallocStackInst:
       return;
-    case ValueKind::StrongRetainInst:
-    case ValueKind::StrongRetainUnownedInst:
-    case ValueKind::RetainValueInst:
-    case ValueKind::UnownedRetainInst:
+    case SILInstructionKind::StrongRetainInst:
+    case SILInstructionKind::StrongRetainUnownedInst:
+    case SILInstructionKind::RetainValueInst:
+    case SILInstructionKind::UnownedRetainInst:
       FInfo->FE.getEffectsOn(I->getOperand(0))->Retains = true;
       return;
-    case ValueKind::StrongReleaseInst:
-    case ValueKind::ReleaseValueInst:
-    case ValueKind::UnownedReleaseInst:
+    case SILInstructionKind::StrongReleaseInst:
+    case SILInstructionKind::ReleaseValueInst:
+    case SILInstructionKind::UnownedReleaseInst:
       FInfo->FE.getEffectsOn(I->getOperand(0))->Releases = true;
       
       // TODO: Check the call graph to be less conservative about what
       // destructors might be called.
       FInfo->FE.setWorstEffects();
       return;
-    case ValueKind::LoadInst:
-      FInfo->FE.getEffectsOn(cast<LoadInst>(I)->getOperand())->Reads = true;
-      return;
-    case ValueKind::StoreInst:
-      FInfo->FE.getEffectsOn(cast<StoreInst>(I)->getDest())->Writes = true;
-      return;
-    case ValueKind::CondFailInst:
+    case SILInstructionKind::UnconditionalCheckedCastInst:
+      FInfo->FE.getEffectsOn(cast<UnconditionalCheckedCastInst>(I)->getOperand())->Reads = true;
       FInfo->FE.Traps = true;
       return;
-    case ValueKind::PartialApplyInst:
-      FInfo->FE.AllocsObjects = true;
+    case SILInstructionKind::LoadInst:
+      FInfo->FE.getEffectsOn(cast<LoadInst>(I)->getOperand())->Reads = true;
       return;
-    case ValueKind::BuiltinInst: {
-      auto &BI = cast<BuiltinInst>(I)->getBuiltinInfo();
+    case SILInstructionKind::StoreInst:
+      FInfo->FE.getEffectsOn(cast<StoreInst>(I)->getDest())->Writes = true;
+      return;
+    case SILInstructionKind::CondFailInst:
+      FInfo->FE.Traps = true;
+      return;
+    case SILInstructionKind::PartialApplyInst: {
+      FInfo->FE.AllocsObjects = true;
+      auto *PAI = cast<PartialApplyInst>(I);
+      auto Args = PAI->getArguments();
+      auto Params = PAI->getSubstCalleeType()->getParameters();
+      Params = Params.slice(Params.size() - Args.size(), Args.size());
+      for (unsigned Idx : indices(Args)) {
+        if (isIndirectFormalParameter(Params[Idx].getConvention()))
+          FInfo->FE.getEffectsOn(Args[Idx])->Reads = true;
+      }
+      return;
+    }
+    case SILInstructionKind::BuiltinInst: {
+      auto *BInst = cast<BuiltinInst>(I);
+      auto &BI = BInst->getBuiltinInfo();
       switch (BI.ID) {
         case BuiltinValueKind::IsUnique:
           // TODO: derive this information in a more general way, e.g. add it
           // to Builtins.def
           FInfo->FE.ReadsRC = true;
           break;
+        case BuiltinValueKind::CondUnreachable:
+          FInfo->FE.Traps = true;
+          return;
         default:
           break;
+      }
+      const IntrinsicInfo &IInfo = BInst->getIntrinsicInfo();
+      if (IInfo.ID == llvm::Intrinsic::trap) {
+        FInfo->FE.Traps = true;
+        return;
       }
       // Detailed memory effects of builtins are handled below by checking the
       // memory behavior of the instruction.
       break;
-      }
+    }
     default:
       break;
   }
@@ -458,13 +491,15 @@ void SideEffectAnalysis::getEffects(FunctionEffects &ApplyEffects, FullApplySite
   ApplyEffects.ParamEffects.resize(FAS.getNumArguments());
 
   // Is this a call to a semantics function?
-  ArraySemanticsCall ASC(FAS.getInstruction());
-  if (ASC && ASC.hasSelf()) {
-    if (getSemanticEffects(ApplyEffects, ASC))
-      return;
+  if (auto apply = dyn_cast<ApplyInst>(FAS.getInstruction())) {
+    ArraySemanticsCall ASC(apply);
+    if (ASC && ASC.hasSelf()) {
+      if (getSemanticEffects(ApplyEffects, ASC))
+        return;
+    }
   }
 
-  if (SILFunction *SingleCallee = FAS.getCalleeFunction()) {
+  if (SILFunction *SingleCallee = FAS.getReferencedFunction()) {
     // Does the function have any @effects?
     if (getDefinedEffects(ApplyEffects, SingleCallee))
       return;
@@ -488,7 +523,7 @@ void SideEffectAnalysis::getEffects(FunctionEffects &ApplyEffects, FullApplySite
   }
 }
 
-void SideEffectAnalysis::invalidate(InvalidationKind K) {
+void SideEffectAnalysis::invalidate() {
   Function2Info.clear();
   Allocator.DestroyAll();
   DEBUG(llvm::dbgs() << "invalidate all\n");

@@ -1,9 +1,15 @@
-add_swift_library(swiftAST
-  ArchetypeBuilder.cpp
+
+if (SWIFT_FORCE_OPTIMIZED_TYPECHECKER)
+  set(EXTRA_AST_FLAGS "FORCE_BUILD_OPTIMIZED")
+endif()
+
+add_swift_library(swiftAST STATIC
   ASTContext.cpp
   ASTDumper.cpp
+  ASTMangler.cpp
   ASTNode.cpp
   ASTPrinter.cpp
+  ASTScope.cpp
   ASTVerifier.cpp
   ASTWalker.cpp
   Attr.cpp
@@ -17,15 +23,19 @@ add_swift_library(swiftAST
   DeclContext.cpp
   DeclNameLoc.cpp
   DefaultArgumentKind.cpp
-  DiagnosticList.cpp
+  DiagnosticConsumer.cpp
   DiagnosticEngine.cpp
+  DiagnosticList.cpp
   DocComment.cpp
   Expr.cpp
+  GenericEnvironment.cpp
   GenericSignature.cpp
+  GenericSignatureBuilder.cpp
   Identifier.cpp
+  LayoutConstraint.cpp
   LookupVisibleDecls.cpp
-  Mangle.cpp
   Module.cpp
+  ModuleLoader.cpp
   ModuleNameLookup.cpp
   NameLookup.cpp
   Parameter.cpp
@@ -34,17 +44,27 @@ add_swift_library(swiftAST
   PrettyStackTrace.cpp
   ProtocolConformance.cpp
   RawComment.cpp
+  RequirementEnvironment.cpp
+  SyntaxASTMap.cpp
+  SILLayout.cpp
   Stmt.cpp
   Substitution.cpp
+  SubstitutionList.cpp
+  SubstitutionMap.cpp
+  SwiftNameTranslation.cpp
   Type.cpp
+  TypeJoinMeet.cpp
   TypeRefinementContext.cpp
   TypeRepr.cpp
   TypeWalker.cpp
   USRGeneration.cpp
+
   LINK_LIBRARIES
     swiftMarkup
     swiftBasic
+    swiftSyntax
 
+  INTERFACE_LINK_LIBRARIES
     # Clang dependencies.
     # FIXME: Clang should really export these in some reasonable manner.
     clangCodeGen
@@ -66,15 +86,19 @@ add_swift_library(swiftAST
     clangAPINotes
     clangBasic
 
-  COMPONENT_DEPENDS
-    bitreader bitwriter irreader debuginfoDWARF
+  LLVM_COMPONENT_DEPENDS
+    bitreader bitwriter coroutines coverage irreader debuginfoDWARF
     profiledata instrumentation object objcarcopts mc mcparser
-    bitreader bitwriter ipo option core support ${LLVM_TARGETS_TO_BUILD}
+    bitreader bitwriter lto ipo option core support ${LLVM_TARGETS_TO_BUILD}
+
+  ${EXTRA_AST_FLAGS}
   )
 
-if(NOT SWIFT_BUILT_STANDALONE)
-  add_dependencies(swiftAST intrinsics_gen)
-endif()
+# intrinsics_gen is the LLVM tablegen target that generates the include files
+# where intrinsics and attributes are declared. swiftAST depends on these
+# headers.
+# For more information see the comment at the top of lib/CMakeLists.txt.
+add_dependencies(swiftAST intrinsics_gen clang-tablegen-targets)
 
 set(swift_ast_verifier_flag)
 if(SWIFT_AST_VERIFIER)

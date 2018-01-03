@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,34 +25,90 @@ using ARCBBState = ARCSequenceDataflowEvaluator::ARCBBState;
 
 } // end anonymous namespace
 
+
+//===----------------------------------------------------------------------===//
+//                             Utilities 
+//===----------------------------------------------------------------------===//
+
+/// Return true if this instruction is the epilogue release for the \p Arg.
+/// false otherwise.
+static bool isOwnedArgumentEpilogueRelease(SILInstruction *I, SILValue Arg,
+                                           EpilogueARCFunctionInfo *EAFI) {
+  auto Releases = 
+    EAFI->computeEpilogueARCInstructions(
+            EpilogueARCContext::EpilogueARCKind::Release, Arg);
+  return Releases.size() && Releases.count(I); 
+}
+
+static bool isGuaranteedSafetyByEpilogueRelease(SILInstruction *I, SILValue Arg,
+                                                EpilogueARCFunctionInfo *EAFI) {
+  auto Releases = 
+    EAFI->computeEpilogueARCInstructions(
+            EpilogueARCContext::EpilogueARCKind::Release, Arg);
+  return Releases.size() && !Releases.count(I);
+}
+
 //===----------------------------------------------------------------------===//
 //                      BottomUpRCStateTransitionVisitor
 //===----------------------------------------------------------------------===//
 
 template <class ARCState>
 BottomUpDataflowRCStateVisitor<ARCState>::BottomUpDataflowRCStateVisitor(
-    RCIdentityFunctionInfo *RCFI, ARCState &State,
-    bool FreezeOwnedArgEpilogueReleases,
-    ConsumedArgToEpilogueReleaseMatcher &ERM,
-    IncToDecStateMapTy &IncToDecStateMap)
-    : RCFI(RCFI), DataflowState(State),
+    RCIdentityFunctionInfo *RCFI, EpilogueARCFunctionInfo *EAFI,
+    ARCState &State, bool FreezeOwnedArgEpilogueReleases,
+    IncToDecStateMapTy &IncToDecStateMap,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory)
+    : RCFI(RCFI), EAFI(EAFI), DataflowState(State),
       FreezeOwnedArgEpilogueReleases(FreezeOwnedArgEpilogueReleases),
-      EpilogueReleaseMatcher(ERM), IncToDecStateMap(IncToDecStateMap) {}
+      IncToDecStateMap(IncToDecStateMap), SetFactory(SetFactory) {}
 
 template <class ARCState>
 typename BottomUpDataflowRCStateVisitor<ARCState>::DataflowResult
 BottomUpDataflowRCStateVisitor<ARCState>::
-visitAutoreleasePoolCall(ValueBase *V) {
+visitAutoreleasePoolCall(SILNode *N) {
   DataflowState.clear();
 
   // We just cleared our BB State so we have no more possible effects.
   return DataflowResult(RCStateTransitionDataflowResultKind::NoEffects);
 }
 
+// private helper method since C++ does not have extensions... *sigh*.
+//
+// TODO: This needs a better name.
+template <class ARCState>
+static bool isKnownSafe(BottomUpDataflowRCStateVisitor<ARCState> *State,
+                        SILInstruction *I, SILValue Op) {
+  // If we are running with 'frozen' owned arg releases, check if we have a
+  // frozen use in the side table. If so, this release must be known safe.
+  if (State->FreezeOwnedArgEpilogueReleases)
+    if (isGuaranteedSafetyByEpilogueRelease(I, Op, State->EAFI))
+      return true;
+
+  // A guaranteed function argument is guaranteed to outlive the function we are
+  // processing. So bottom up for such a parameter, we are always known safe.
+  if (auto *Arg = dyn_cast<SILFunctionArgument>(Op)) {
+    if (Arg->hasConvention(SILArgumentConvention::Direct_Guaranteed)) {
+      return true;
+    }
+  }
+
+  // If Op is a load from an in_guaranteed parameter, it is guaranteed as well.
+  if (auto *LI = dyn_cast<LoadInst>(Op)) {
+    SILValue RCIdentity = State->RCFI->getRCIdentityRoot(LI->getOperand());
+    if (auto *Arg = dyn_cast<SILFunctionArgument>(RCIdentity)) {
+      if (Arg->hasConvention(SILArgumentConvention::Indirect_In_Guaranteed)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 template <class ARCState>
 typename BottomUpDataflowRCStateVisitor<ARCState>::DataflowResult
-BottomUpDataflowRCStateVisitor<ARCState>::visitStrongDecrement(ValueBase *V) {
-  auto *I = dyn_cast<SILInstruction>(V);
+BottomUpDataflowRCStateVisitor<ARCState>::visitStrongDecrement(SILNode *N) {
+  auto *I = dyn_cast<SILInstruction>(N);
   if (!I)
     return DataflowResult();
 
@@ -61,21 +117,14 @@ BottomUpDataflowRCStateVisitor<ARCState>::visitStrongDecrement(ValueBase *V) {
   // If this instruction is a post dominating release, skip it so we don't pair
   // it up with anything. Do make sure that it does not effect any other
   // instructions.
-  if (FreezeOwnedArgEpilogueReleases &&
-      EpilogueReleaseMatcher.isReleaseMatchedToArgument(I))
+  if (FreezeOwnedArgEpilogueReleases && isOwnedArgumentEpilogueRelease(I, Op, EAFI))
     return DataflowResult(Op);
 
   BottomUpRefCountState &State = DataflowState.getBottomUpRefCountState(Op);
-  bool NestingDetected = State.initWithMutatorInst(I);
+  bool NestingDetected = State.initWithMutatorInst(SetFactory.get(I), RCFI);
 
-  // If we are running with 'frozen' owned arg releases, check if we have a
-  // frozen use in the side table. If so, this release must be known safe.
-  if (FreezeOwnedArgEpilogueReleases) {
-    if (auto *OwnedRelease = EpilogueReleaseMatcher.releaseForArgument(Op)) {
-      if (I != OwnedRelease) {
-        State.updateKnownSafe(true);
-      }
-    }
+  if (isKnownSafe(this, I, Op)) {
+    State.updateKnownSafe(true);
   }
 
   DEBUG(llvm::dbgs() << "    REF COUNT DECREMENT! Known Safe: "
@@ -88,8 +137,8 @@ BottomUpDataflowRCStateVisitor<ARCState>::visitStrongDecrement(ValueBase *V) {
 
 template <class ARCState>
 typename BottomUpDataflowRCStateVisitor<ARCState>::DataflowResult
-BottomUpDataflowRCStateVisitor<ARCState>::visitStrongIncrement(ValueBase *V) {
-  auto *I = dyn_cast<SILInstruction>(V);
+BottomUpDataflowRCStateVisitor<ARCState>::visitStrongIncrement(SILNode *N) {
+  auto *I = dyn_cast<SILInstruction>(N);
   if (!I)
     return DataflowResult();
 
@@ -134,14 +183,15 @@ BottomUpDataflowRCStateVisitor<ARCState>::visitStrongIncrement(ValueBase *V) {
 template <class ARCState>
 TopDownDataflowRCStateVisitor<ARCState>::TopDownDataflowRCStateVisitor(
     RCIdentityFunctionInfo *RCFI, ARCState &DataflowState,
-    DecToIncStateMapTy &DecToIncStateMap)
+    DecToIncStateMapTy &DecToIncStateMap,
+    ImmutablePointerSetFactory<SILInstruction> &SetFactory)
     : RCFI(RCFI), DataflowState(DataflowState),
-      DecToIncStateMap(DecToIncStateMap) {}
+      DecToIncStateMap(DecToIncStateMap), SetFactory(SetFactory) {}
 
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
 TopDownDataflowRCStateVisitor<ARCState>::
-visitAutoreleasePoolCall(ValueBase *V) {
+visitAutoreleasePoolCall(SILNode *N) {
   DataflowState.clear();
   // We just cleared our BB State so we have no more possible effects.
   return DataflowResult(RCStateTransitionDataflowResultKind::NoEffects);
@@ -149,8 +199,8 @@ visitAutoreleasePoolCall(ValueBase *V) {
 
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
-TopDownDataflowRCStateVisitor<ARCState>::visitStrongDecrement(ValueBase *V) {
-  auto *I = dyn_cast<SILInstruction>(V);
+TopDownDataflowRCStateVisitor<ARCState>::visitStrongDecrement(SILNode *N) {
+  auto *I = dyn_cast<SILInstruction>(N);
   if (!I)
     return DataflowResult();
 
@@ -191,8 +241,8 @@ TopDownDataflowRCStateVisitor<ARCState>::visitStrongDecrement(ValueBase *V) {
 
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
-TopDownDataflowRCStateVisitor<ARCState>::visitStrongIncrement(ValueBase *V) {
-  auto *I = dyn_cast<SILInstruction>(V);
+TopDownDataflowRCStateVisitor<ARCState>::visitStrongIncrement(SILNode *N) {
+  auto *I = dyn_cast<SILInstruction>(N);
   if (!I)
     return DataflowResult();
 
@@ -200,7 +250,7 @@ TopDownDataflowRCStateVisitor<ARCState>::visitStrongIncrement(ValueBase *V) {
   // count state and continue...
   SILValue Op = RCFI->getRCIdentityRoot(I->getOperand(0));
   auto &State = DataflowState.getTopDownRefCountState(Op);
-  bool NestingDetected = State.initWithMutatorInst(I);
+  bool NestingDetected = State.initWithMutatorInst(SetFactory.get(I), RCFI);
 
   DEBUG(llvm::dbgs() << "    REF COUNT INCREMENT! Known Safe: "
                      << (State.isKnownSafe() ? "yes" : "no") << "\n");
@@ -212,11 +262,11 @@ TopDownDataflowRCStateVisitor<ARCState>::visitStrongIncrement(ValueBase *V) {
 
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
-TopDownDataflowRCStateVisitor<ARCState>::
-visitStrongEntranceArgument(SILArgument *Arg) {
+TopDownDataflowRCStateVisitor<ARCState>::visitStrongEntranceArgument(
+    SILFunctionArgument *Arg) {
   DEBUG(llvm::dbgs() << "VISITING ENTRANCE ARGUMENT: " << *Arg);
 
-  if (!Arg->hasConvention(ParameterConvention::Direct_Owned)) {
+  if (!Arg->hasConvention(SILArgumentConvention::Direct_Owned)) {
     DEBUG(llvm::dbgs() << "    Not owned! Bailing!\n");
     return DataflowResult();
   }
@@ -237,14 +287,20 @@ visitStrongEntranceApply(ApplyInst *AI) {
 
   // We should have checked earlier that AI has an owned result value. To
   // prevent mistakes, assert that here.
-  assert(AI->hasResultConvention(ResultConvention::Owned) &&
-         "Expected AI to be Owned here");
+#ifndef NDEBUG
+  bool hasOwnedResult = false;
+  for (auto result : AI->getSubstCalleeConv().getDirectSILResults()) {
+    if (result.getConvention() == ResultConvention::Owned)
+      hasOwnedResult = true;
+  }
+  assert(hasOwnedResult && "Expected AI to be Owned here");
+#endif
 
   // Otherwise, return a dataflow result containing a +1.
   DEBUG(llvm::dbgs() << "    Initializing state.\n");
 
   auto &State = DataflowState.getTopDownRefCountState(AI);
-  State.initWithEntranceInst(AI, AI);
+  State.initWithEntranceInst(SetFactory.get(AI), AI);
 
   return DataflowResult(AI);
 }
@@ -255,7 +311,7 @@ TopDownDataflowRCStateVisitor<ARCState>::
 visitStrongEntranceAllocRef(AllocRefInst *ARI) {
   // Alloc refs always introduce new references at +1.
   TopDownRefCountState &State = DataflowState.getTopDownRefCountState(ARI);
-  State.initWithEntranceInst(ARI, ARI);
+  State.initWithEntranceInst(SetFactory.get(ARI), ARI);
 
   return DataflowResult(ARI);
 }
@@ -266,7 +322,7 @@ TopDownDataflowRCStateVisitor<ARCState>::
 visitStrongEntranceAllocRefDynamic(AllocRefDynamicInst *ARI) {
   // Alloc ref dynamic always introduce references at +1.
   auto &State = DataflowState.getTopDownRefCountState(ARI);
-  State.initWithEntranceInst(ARI, ARI);
+  State.initWithEntranceInst(SetFactory.get(ARI), ARI);
 
   return DataflowResult(ARI);
 }
@@ -277,27 +333,27 @@ TopDownDataflowRCStateVisitor<ARCState>::
 visitStrongAllocBox(AllocBoxInst *ABI) {
   // Alloc box introduces a ref count of +1 on its container.
   auto &State = DataflowState.getTopDownRefCountState(ABI);
-  State.initWithEntranceInst(ABI, ABI);
+  State.initWithEntranceInst(SetFactory.get(ABI), ABI);
   return DataflowResult(ABI);
 }
 
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
 TopDownDataflowRCStateVisitor<ARCState>::
-visitStrongEntrance(ValueBase *V) {
-  if (auto *Arg = dyn_cast<SILArgument>(V))
+visitStrongEntrance(SILNode *N) {
+  if (auto *Arg = dyn_cast<SILFunctionArgument>(N))
     return visitStrongEntranceArgument(Arg);
 
-  if (auto *AI = dyn_cast<ApplyInst>(V))
+  if (auto *AI = dyn_cast<ApplyInst>(N))
     return visitStrongEntranceApply(AI);
 
-  if (auto *ARI = dyn_cast<AllocRefInst>(V))
+  if (auto *ARI = dyn_cast<AllocRefInst>(N))
     return visitStrongEntranceAllocRef(ARI);
 
-  if (auto *ARI = dyn_cast<AllocRefDynamicInst>(V))
+  if (auto *ARI = dyn_cast<AllocRefDynamicInst>(N))
     return visitStrongEntranceAllocRefDynamic(ARI);
 
-  if (auto *ABI = dyn_cast<AllocBoxInst>(V))
+  if (auto *ABI = dyn_cast<AllocBoxInst>(N))
     return visitStrongAllocBox(ABI);
 
   return DataflowResult();
@@ -314,4 +370,4 @@ template class BottomUpDataflowRCStateVisitor<ARCRegionState>;
 template class TopDownDataflowRCStateVisitor<ARCBBState>;
 template class TopDownDataflowRCStateVisitor<ARCRegionState>;
 
-} // end swift namespace
+} // namespace swift

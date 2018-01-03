@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -39,7 +39,8 @@ static void configureARM64(IRGenModule &IGM, const llvm::Triple &triple,
             SWIFT_ABI_ARM64_SWIFT_SPARE_BITS_MASK);
   setToMask(target.ObjCPointerReservedBits, 64,
             SWIFT_ABI_ARM64_OBJC_RESERVED_BITS_MASK);
-  
+  setToMask(target.IsObjCPointerBit, 64, SWIFT_ABI_ARM64_IS_OBJC_BIT);
+
   if (triple.isOSDarwin()) {
     target.LeastValidPointerValue =
       SWIFT_ABI_DARWIN_ARM64_LEAST_VALID_POINTER;
@@ -50,10 +51,14 @@ static void configureARM64(IRGenModule &IGM, const llvm::Triple &triple,
 
   // arm64 requires marker assembly for objc_retainAutoreleasedReturnValue.
   target.ObjCRetainAutoreleasedReturnValueMarker =
-    "mov\tfp, fp\t\t; marker for objc_retainAutoreleaseReturnValue";
+    "mov\tfp, fp\t\t# marker for objc_retainAutoreleaseReturnValue";
 
   // arm64 requires ISA-masking.
   target.ObjCUseISAMask = true;
+
+  // arm64 tops out at 56 effective bits of address space and reserves the high
+  // half for the kernel.
+  target.SwiftRetainIgnoresNegativeValues = true;
 }
 
 /// Configures target-specific information for x86-64 platforms.
@@ -63,7 +68,8 @@ static void configureX86_64(IRGenModule &IGM, const llvm::Triple &triple,
             SWIFT_ABI_X86_64_SWIFT_SPARE_BITS_MASK);
   setToMask(target.ObjCPointerReservedBits, 64,
             SWIFT_ABI_X86_64_OBJC_RESERVED_BITS_MASK);
-  
+  setToMask(target.IsObjCPointerBit, 64, SWIFT_ABI_X86_64_IS_OBJC_BIT);
+
   if (triple.isOSDarwin()) {
     target.LeastValidPointerValue =
       SWIFT_ABI_DARWIN_X86_64_LEAST_VALID_POINTER;
@@ -75,6 +81,10 @@ static void configureX86_64(IRGenModule &IGM, const llvm::Triple &triple,
 
   // x86-64 requires ISA-masking.
   target.ObjCUseISAMask = true;
+  
+  // x86-64 only has 48 effective bits of address space and reserves the high
+  // half for the kernel.
+  target.SwiftRetainIgnoresNegativeValues = true;
 }
 
 /// Configures target-specific information for 32-bit x86 platforms.
@@ -82,6 +92,7 @@ static void configureX86(IRGenModule &IGM, const llvm::Triple &triple,
                          SwiftTargetInfo &target) {
   // x86 uses objc_msgSend_fpret but not objc_msgSend_fp2ret.
   target.ObjCUseFPRet = true;
+  setToMask(target.IsObjCPointerBit, 32, SWIFT_ABI_I386_IS_OBJC_BIT);
 }
 
 /// Configures target-specific information for 32-bit arm platforms.
@@ -90,6 +101,12 @@ static void configureARM(IRGenModule &IGM, const llvm::Triple &triple,
   // ARM requires marker assembly for objc_retainAutoreleasedReturnValue.
   target.ObjCRetainAutoreleasedReturnValueMarker =
     "mov\tr7, r7\t\t@ marker for objc_retainAutoreleaseReturnValue";
+
+  // armv7k has opaque ISAs which must go through the ObjC runtime.
+  if (triple.getSubArch() == llvm::Triple::SubArchType::ARMSubArch_v7k)
+    target.ObjCHasOpaqueISAs = true;
+
+  setToMask(target.IsObjCPointerBit, 32, SWIFT_ABI_ARM_IS_OBJC_BIT);
 }
 
 /// Configures target-specific information for powerpc64 platforms.
@@ -97,6 +114,13 @@ static void configurePowerPC64(IRGenModule &IGM, const llvm::Triple &triple,
                                SwiftTargetInfo &target) {
   setToMask(target.PointerSpareBits, 64,
             SWIFT_ABI_POWERPC64_SWIFT_SPARE_BITS_MASK);
+}
+
+/// Configures target-specific information for SystemZ platforms.
+static void configureSystemZ(IRGenModule &IGM, const llvm::Triple &triple,
+                             SwiftTargetInfo &target) {
+  setToMask(target.PointerSpareBits, 64,
+            SWIFT_ABI_S390X_SWIFT_SPARE_BITS_MASK);
 }
 
 /// Configure a default target.
@@ -122,11 +146,12 @@ SwiftTargetInfo SwiftTargetInfo::get(IRGenModule &IGM) {
   // Prepare generic target information.
   SwiftTargetInfo target(triple.getObjectFormat(), pointerSize);
   
-  // On Apple platforms, we implement "once" using dispatch_once, which exposes
-  // -1 as ABI for the "done" value.
+  // On Apple platforms, we implement "once" using dispatch_once,
+  // which exposes a barrier-free inline path with -1 as the "done" value.
   if (triple.isOSDarwin())
     target.OnceDonePredicateValue = -1L;
-  // TODO: Do we know this for Linux?
+  // Other platforms use std::call_once() and we don't
+  // assume that they have a barrier-free inline fast path.
   
   switch (triple.getArch()) {
   case llvm::Triple::x86_64:
@@ -138,6 +163,7 @@ SwiftTargetInfo SwiftTargetInfo::get(IRGenModule &IGM) {
     break;
 
   case llvm::Triple::arm:
+  case llvm::Triple::thumb:
     configureARM(IGM, triple, target);
     break;
 
@@ -148,6 +174,10 @@ SwiftTargetInfo SwiftTargetInfo::get(IRGenModule &IGM) {
   case llvm::Triple::ppc64:
   case llvm::Triple::ppc64le:
     configurePowerPC64(IGM, triple, target);
+    break;
+
+  case llvm::Triple::systemz:
+    configureSystemZ(IGM, triple, target);
     break;
 
   default:

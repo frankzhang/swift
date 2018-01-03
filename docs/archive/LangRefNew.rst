@@ -494,7 +494,7 @@ The Swift compiler does not normalize Unicode source code, and matches
 identifiers by code points only.  Source code must be normalized to a consistent
 normalization form before being submitted to the compiler.
 
-::
+.. code-block:: none
 
   // Valid identifiers
   foo
@@ -1348,7 +1348,7 @@ otherwise empty cases in switch statements.
 
 ::
 
-  func classifyPoint(point: (Int, Int)) {
+  func classifyPoint(_ point: (Int, Int)) {
     switch point {
     case (0, 0):
       print("origin")

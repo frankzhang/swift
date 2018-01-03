@@ -1,15 +1,17 @@
-add_swift_library(swiftFrontend
+add_swift_library(swiftFrontend STATIC
   CompilerInvocation.cpp
   DiagnosticVerifier.cpp
   Frontend.cpp
   FrontendOptions.cpp
   PrintingDiagnosticConsumer.cpp
   SerializedDiagnosticConsumer.cpp
-  DEPENDS SwiftOptions
+  DEPENDS
+    SwiftOptions
   LINK_LIBRARIES
     swiftSIL
+    swiftMigrator
     swiftOption
-    swiftParse
+    swiftParseSIL
     swiftSema
     swiftSerialization)
 

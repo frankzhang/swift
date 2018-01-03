@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,11 +18,13 @@
 #include "LocalTypeData.h"
 #include "Fulfillment.h"
 #include "GenMeta.h"
+#include "GenOpaque.h"
 #include "GenProto.h"
 #include "IRGenDebugInfo.h"
 #include "IRGenFunction.h"
 #include "IRGenModule.h"
 #include "swift/AST/IRGenOptions.h"
+#include "swift/AST/ProtocolConformance.h"
 #include "swift/SIL/SILModule.h"
 
 using namespace swift;
@@ -53,7 +55,7 @@ void IRGenFunction::destroyLocalTypeData() {
   delete LocalTypeData;
 }
 
-unsigned LocalTypeDataCache::CacheEntry::cost() const {
+OperationCost LocalTypeDataCache::CacheEntry::cost() const {
   switch (getKind()) {
   case Kind::Concrete:
     return static_cast<const ConcreteCacheEntry*>(this)->cost();
@@ -97,13 +99,12 @@ llvm::Value *LocalTypeDataCache::tryGet(IRGenFunction &IGF, Key key,
   if (it == Map.end()) return nullptr;
   auto &chain = it->second;
 
-  CacheEntry *best = nullptr, *bestPrev = nullptr;
-  Optional<unsigned> bestCost;
+  CacheEntry *best = nullptr;
+  Optional<OperationCost> bestCost;
 
-  CacheEntry *next = chain.Root, *nextPrev = nullptr;
+  CacheEntry *next = chain.Root;
   while (next) {
-    CacheEntry *cur = next, *curPrev = nextPrev;
-    nextPrev = cur;
+    CacheEntry *cur = next;
     next = cur->getNext();
 
     // Ignore abstract entries if so requested.
@@ -120,7 +121,7 @@ llvm::Value *LocalTypeDataCache::tryGet(IRGenFunction &IGF, Key key,
       // If that's zero, go ahead and short-circuit out.
       if (!bestCost) {
         bestCost = best->cost();
-        if (*bestCost == 0) break;
+        if (*bestCost == OperationCost::Free) break;
       }
 
       auto curCost = cur->cost();
@@ -130,7 +131,6 @@ llvm::Value *LocalTypeDataCache::tryGet(IRGenFunction &IGF, Key key,
       bestCost = curCost;
     }
     best = cur;
-    bestPrev = curPrev;
   }
 
   // If we didn't find anything, we're done.
@@ -195,7 +195,7 @@ static void maybeEmitDebugInfoForLocalTypeData(IRGenFunction &IGF,
 
   // At -O0, create an alloca to keep the type alive.
   auto name = type->getFullName();
-  if (!IGF.IGM.Opts.Optimize) {
+  if (!IGF.IGM.IRGen.Opts.shouldOptimize()) {
     auto temp = IGF.createAlloca(data->getType(), IGF.IGM.getPointerAlignment(),
                                  name);
     IGF.Builder.CreateStore(data, temp);
@@ -251,17 +251,65 @@ void IRGenFunction::bindLocalTypeDataFromTypeMetadata(CanType type,
     .addAbstractForTypeMetadata(*this, type, isExact, metadata);
 }
 
+void IRGenFunction::bindLocalTypeDataFromSelfWitnessTable(
+                const ProtocolConformance *conformance,
+                llvm::Value *selfTable,
+                llvm::function_ref<CanType (CanType)> getTypeInContext) {
+  SILWitnessTable::enumerateWitnessTableConditionalConformances(
+      conformance,
+      [&](unsigned index, CanType type, ProtocolDecl *proto) {
+        auto archetype = getTypeInContext(type);
+        if (isa<ArchetypeType>(archetype)) {
+          WitnessIndex wIndex(privateWitnessTableIndexToTableOffset(index),
+                              /*prefix*/ false);
+
+          auto table =
+              emitInvariantLoadOfOpaqueWitness(*this, selfTable, wIndex);
+          table = Builder.CreateBitCast(table, IGM.WitnessTablePtrTy);
+          setProtocolWitnessTableName(IGM, table, archetype, proto);
+
+          setUnscopedLocalTypeData(
+              archetype,
+              LocalTypeDataKind::forAbstractProtocolWitnessTable(proto),
+              table);
+        }
+
+        return /*finished?*/ false;
+      });
+}
+
 void LocalTypeDataCache::addAbstractForTypeMetadata(IRGenFunction &IGF,
                                                     CanType type,
                                                     IsExact_t isExact,
                                                     llvm::Value *metadata) {
+  struct Callback : FulfillmentMap::InterestingKeysCallback {
+    bool isInterestingType(CanType type) const override {
+      return true;
+    }
+    bool hasInterestingType(CanType type) const override {
+      return true;
+    }
+    bool hasLimitedInterestingConformances(CanType type) const override {
+      return false;
+    }
+    GenericSignature::ConformsToArray
+    getInterestingConformances(CanType type) const override {
+      llvm_unreachable("no limits");
+    }
+    CanType getSuperclassBound(CanType type) const override {
+      if (auto arch = dyn_cast<ArchetypeType>(type))
+        if (auto superclassTy = arch->getSuperclass())
+          return superclassTy->getCanonicalType();
+      return CanType();
+    }
+  } callbacks;
+
   // Look for anything at all that's fulfilled by this.  If we don't find
   // anything, stop.
   FulfillmentMap fulfillments;
-  if (!fulfillments.searchTypeMetadata(*IGF.IGM.SILMod->getSwiftModule(),
-                                       type, isExact,
+  if (!fulfillments.searchTypeMetadata(IGF.IGM, type, isExact,
                                        /*source*/ 0, MetadataPath(),
-                                       FulfillmentMap::Everything())) {
+                                       callbacks)) {
     return;
   }
 
@@ -319,8 +367,8 @@ addAbstractForFulfillments(IRGenFunction &IGF, FulfillmentMap &&fulfillments,
 
     // Check whether there's already an entry that's at least as good as the
     // fulfillment.
-    Optional<unsigned> fulfillmentCost;
-    auto getFulfillmentCost = [&]() -> unsigned {
+    Optional<OperationCost> fulfillmentCost;
+    auto getFulfillmentCost = [&]() -> OperationCost {
       if (!fulfillmentCost)
         fulfillmentCost = fulfillment.second.Path.cost();
       return *fulfillmentCost;
@@ -337,7 +385,7 @@ addAbstractForFulfillments(IRGenFunction &IGF, FulfillmentMap &&fulfillments,
 
       // Ensure that the entry isn't better than the fulfillment.
       auto curCost = cur->cost();
-      if (curCost == 0 || curCost <= getFulfillmentCost()) {
+      if (curCost == OperationCost::Free || curCost <= getFulfillmentCost()) {
         foundBetter = true;
         break;
       }
@@ -371,8 +419,8 @@ addAbstractForFulfillments(IRGenFunction &IGF, FulfillmentMap &&fulfillments,
     chain.push_front(newEntry);
   }
 }
-
-void LocalTypeDataCache::dump() const {
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void LocalTypeDataCache::dump() const {
   auto &out = llvm::errs();
 
   if (Map.empty()) {
@@ -381,8 +429,9 @@ void LocalTypeDataCache::dump() const {
   }
 
   for (auto &mapEntry : Map) {
-    out << "(" << mapEntry.first.Type.getPointer()
-        << "," << mapEntry.first.Kind.getRawValue() << ") => [";
+    mapEntry.first.print(out);
+    out << " => [";
+
     if (mapEntry.second.Root) out << "\n";
     for (auto cur = mapEntry.second.Root; cur; cur = cur->getNext()) {
       out << "  (";
@@ -409,6 +458,46 @@ void LocalTypeDataCache::dump() const {
       }
     }
     out << "]\n";
+  }
+}
+#endif
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void LocalTypeDataKey::dump() const {
+  print(llvm::errs());
+}
+#endif
+
+void LocalTypeDataKey::print(llvm::raw_ostream &out) const {
+  out << "(" << Type.getPointer()
+      << " (" << Type << "), ";
+  Kind.print(out);
+  out << ")";
+}
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void LocalTypeDataKind::dump() const {
+  print(llvm::errs());
+}
+#endif
+
+void LocalTypeDataKind::print(llvm::raw_ostream &out) const {
+  if (isConcreteProtocolConformance()) {
+    out << "ConcreteConformance(";
+    getConcreteProtocolConformance()->printName(out);
+    out << ")";
+  } else if (isAbstractProtocolConformance()) {
+    out << "AbstractConformance("
+        << getAbstractProtocolConformance()->getName()
+        << ")";
+  } else if (Value == TypeMetadata) {
+    out << "TypeMetadata";
+  } else if (Value == ValueWitnessTable) {
+    out << "ValueWitnessTable";
+  } else {
+    assert(isSingletonKind());
+    ValueWitness witness = ValueWitness(Value - ValueWitnessBase);
+    out << getValueWitnessName(witness);
   }
 }
 

@@ -1,7 +1,9 @@
-// RUN: not %target-swift-frontend %s -parse
+// This source file is part of the Swift.org open source project
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
-// Distributed under the terms of the MIT license
-// Test case submitted to project by https://github.com/practicalswift (practicalswift)
-// Test case found by fuzzing
-
-func b{struct Q<T where g:c{enum S{{}class a{class B{struct B{enum S<a{struct B{class a{struct Q{struct D:CollectionType
+// RUN: not %target-swift-frontend %s -typecheck
+func b{struct Q<T where g:c{enum S{{}class a{class B{struct B{enum S<a{struct B{class a{struct Q{struct D:Collection

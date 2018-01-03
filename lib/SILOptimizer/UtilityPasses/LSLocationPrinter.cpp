@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,13 +16,13 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "sil-memlocation-dumper"
-#include "swift/SILOptimizer/PassManager/Passes.h"
 #include "swift/SIL/Projection.h"
 #include "swift/SIL/SILFunction.h"
 #include "swift/SIL/SILValue.h"
-#include "swift/SIL/SILValueProjection.h"
 #include "swift/SILOptimizer/Analysis/Analysis.h"
+#include "swift/SILOptimizer/PassManager/Passes.h"
 #include "swift/SILOptimizer/PassManager/Transforms.h"
+#include "swift/SILOptimizer/Utils/LoadStoreOptUtils.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
@@ -50,9 +50,9 @@ static llvm::cl::opt<MLKind> LSLocationKinds(
         clEnumValN(MLKind::OnlyReduction, "only-reduction", "only-reduction"),
         clEnumValN(MLKind::OnlyTypeExpansion, "only-type-expansion",
                    "only-type-expansion"),
-        clEnumValN(MLKind::All, "all", "all"), clEnumValEnd));
+        clEnumValN(MLKind::All, "all", "all")));
 
-static llvm::cl::opt<bool> UseNewProjection("lslocation-dump-use-new-projection",
+static llvm::cl::opt<bool> UseProjection("lslocation-dump-use-new-projection",
                                             llvm::cl::init(false));
 
 namespace {
@@ -91,7 +91,7 @@ public:
 
         llvm::outs() << "#" << Counter++ << II;
         for (auto &T : PPList) {
-          llvm::outs() << T.getValue();
+          T.getValue().print(llvm::outs(), *M);
         }
         PPList.clear();
       }
@@ -99,9 +99,9 @@ public:
     llvm::outs() << "\n";
   }
 
-  void printTypeExpansionWithNewProjection(SILFunction &Fn) {
+  void printTypeExpansionWithProjection(SILFunction &Fn) {
     SILModule *M = &Fn.getModule();
-    llvm::SmallVector<Optional<NewProjectionPath>, 8> PPList;
+    llvm::SmallVector<Optional<ProjectionPath>, 8> PPList;
     unsigned Counter = 0;
     for (auto &BB : Fn) {
       for (auto &II : BB) {
@@ -111,12 +111,12 @@ public:
           V = LI->getOperand();
           // This is an address type, take it object type.
           Ty = V->getType().getObjectType();
-          NewProjectionPath::expandTypeIntoLeafProjectionPaths(Ty, M, PPList);
+          ProjectionPath::expandTypeIntoLeafProjectionPaths(Ty, M, PPList);
         } else if (auto *SI = dyn_cast<StoreInst>(&II)) {
           V = SI->getDest();
           // This is an address type, take it object type.
           Ty = V->getType().getObjectType();
-          NewProjectionPath::expandTypeIntoLeafProjectionPaths(Ty, M, PPList);
+          ProjectionPath::expandTypeIntoLeafProjectionPaths(Ty, M, PPList);
         } else {
           // Not interested in these instructions yet.
           continue;
@@ -147,14 +147,14 @@ public:
         if (auto *LI = dyn_cast<LoadInst>(&II)) {
           SILValue Mem = LI->getOperand();
           SILValue UO = getUnderlyingObject(Mem);
-          L.init(UO, NewProjectionPath::getProjectionPath(UO, Mem));
+          L.init(UO, ProjectionPath::getProjectionPath(UO, Mem));
           if (!L.isValid())
             continue;
           LSLocation::expand(L, &Fn.getModule(), Locs, TE);
         } else if (auto *SI = dyn_cast<StoreInst>(&II)) {
           SILValue Mem = SI->getDest();
           SILValue UO = getUnderlyingObject(Mem);
-          L.init(UO, NewProjectionPath::getProjectionPath(UO, Mem));
+          L.init(UO, ProjectionPath::getProjectionPath(UO, Mem));
           if (!L.isValid())
             continue;
           LSLocation::expand(L, &Fn.getModule(), Locs, TE);
@@ -165,7 +165,7 @@ public:
 
         llvm::outs() << "#" << Counter++ << II;
         for (auto &Loc : Locs) {
-          Loc.print(&Fn.getModule());
+          Loc.print(llvm::outs(), &Fn.getModule());
         }
         Locs.clear();
       }
@@ -191,14 +191,14 @@ public:
         if (auto *LI = dyn_cast<LoadInst>(&II)) {
           SILValue Mem = LI->getOperand();
           SILValue UO = getUnderlyingObject(Mem);
-          L.init(UO, NewProjectionPath::getProjectionPath(UO, Mem));
+          L.init(UO, ProjectionPath::getProjectionPath(UO, Mem));
           if (!L.isValid())
             continue;
           LSLocation::expand(L, &Fn.getModule(), Locs, TE);
         } else if (auto *SI = dyn_cast<StoreInst>(&II)) {
           SILValue Mem = SI->getDest();
           SILValue UO = getUnderlyingObject(Mem);
-          L.init(UO, NewProjectionPath::getProjectionPath(UO, Mem));
+          L.init(UO, ProjectionPath::getProjectionPath(UO, Mem));
           if (!L.isValid())
             continue;
           LSLocation::expand(L, &Fn.getModule(), Locs, TE);
@@ -216,10 +216,10 @@ public:
         }
 
         // This should get the original (unexpanded) location back.
-        LSLocation::reduce(L, &Fn.getModule(), SLocs, TE);
+        LSLocation::reduce(L, &Fn.getModule(), SLocs);
         llvm::outs() << "#" << Counter++ << II;
         for (auto &Loc : SLocs) {
-          Loc.print(&Fn.getModule());
+          Loc.print(llvm::outs(), &Fn.getModule());
         }
         L.reset();
         Locs.clear();
@@ -239,7 +239,7 @@ public:
       llvm::outs() << "@" << Fn.getName() << "\n";
       switch (LSLocationKinds) {
         case MLKind::OnlyTypeExpansion:
-          printTypeExpansionWithNewProjection(Fn);
+          printTypeExpansionWithProjection(Fn);
           break;
         case MLKind::OnlyExpansion:
           printMemExpansion(Fn);
@@ -253,7 +253,6 @@ public:
     }
   }
 
-  StringRef getName() override { return "Mem Location Dumper"; }
 };
 
 } // end anonymous namespace

@@ -1,29 +1,26 @@
 set(swift_stdlib_unittest_compile_flags)
-if(SWIFT_SERIALIZE_STDLIB_UNITTEST)
-  list(APPEND swift_stdlib_unittest_compile_flags "-Xfrontend" "-sil-serialize-all")
-endif()
 
-set(swift_stdlib_unittest_framework_depends)
-if(SWIFT_HOST_VARIANT MATCHES "${SWIFT_DARWIN_VARIANTS}")
-  list(APPEND swift_stdlib_unittest_framework_depends
-    Foundation)
-endif()
-
-add_swift_library(swiftStdlibCollectionUnittest SHARED IS_STDLIB
+# TODO: support this on non-POSIX platforms.  It cannot be currently as it
+# depends on pthreads.
+add_swift_library(swiftStdlibCollectionUnittest ${SWIFT_STDLIB_LIBRARY_BUILD_TYPES} IS_STDLIB
   # This file should be listed the first.  Module name is inferred from the
   # filename.
   StdlibCollectionUnittest.swift
 
-  CheckCollectionType.swift
+  CheckCollectionInstance.swift.gyb
+  CheckCollectionType.swift.gyb
   CheckMutableCollectionType.swift.gyb
   CheckRangeReplaceableCollectionType.swift
   CheckRangeReplaceableSliceType.swift
+  CheckSequenceInstance.swift.gyb
   CheckSequenceType.swift
+  LoggingWrappers.swift.gyb
   MinimalCollections.swift.gyb
+  RangeSelection.swift
+  ../../public/core/WriteBackMutableSlice.swift
 
-  PRIVATE_LINK_LIBRARIES ${swift_stdlib_unittest_private_link_libraries}
   SWIFT_MODULE_DEPENDS StdlibUnittest
   SWIFT_COMPILE_FLAGS ${swift_stdlib_unittest_compile_flags}
-  FRAMEWORK_DEPENDS ${swift_stdlib_unittest_framework_depends}
+  TARGET_SDKS ALL_POSIX_PLATFORMS
   INSTALL_IN_COMPONENT stdlib-experimental)
 

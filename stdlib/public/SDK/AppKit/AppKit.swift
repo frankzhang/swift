@@ -2,20 +2,20 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
 import Foundation
 @_exported import AppKit
 
-extension NSCursor : CustomPlaygroundQuickLookable {
-  public func customPlaygroundQuickLook() -> PlaygroundQuickLook {
-    return .Image(image)
+extension NSCursor : _DefaultCustomPlaygroundQuickLookable {
+  public var _defaultCustomPlaygroundQuickLook: PlaygroundQuickLook {
+    return .image(image)
   }
 }
 
@@ -23,8 +23,8 @@ internal struct _NSViewQuickLookState {
   static var views = Set<NSView>()
 }
 
-extension NSView : CustomPlaygroundQuickLookable {
-  public func customPlaygroundQuickLook() -> PlaygroundQuickLook {
+extension NSView : _DefaultCustomPlaygroundQuickLookable {
+  public var _defaultCustomPlaygroundQuickLook: PlaygroundQuickLook {
     // if you set NSView.needsDisplay, you can get yourself in a recursive scenario where the same view
     // could need to draw itself in order to get a QLObject for itself, which in turn if your code was
     // instrumented to log on-draw, would cause yourself to get back here and so on and so forth
@@ -33,15 +33,15 @@ extension NSView : CustomPlaygroundQuickLookable {
     // an empty view, which is probably a safer option than crashing
     // FIXME: is there a way to say "cacheDisplayInRect butDoNotRedrawEvenIfISaidSo"?
     if _NSViewQuickLookState.views.contains(self) {
-      return .View(NSImage())
+      return .view(NSImage())
     } else {
       _NSViewQuickLookState.views.insert(self)
       let result: PlaygroundQuickLook
-      if let b = bitmapImageRepForCachingDisplayInRect(bounds) {
-        cacheDisplayInRect(bounds, toBitmapImageRep: b)
-        result = .View(b)
+      if let b = bitmapImageRepForCachingDisplay(in: bounds) {
+        cacheDisplay(in: bounds, to: b)
+        result = .view(b)
       } else {
-        result = .View(NSImage())
+        result = .view(NSImage())
       }
       _NSViewQuickLookState.views.remove(self)
       return result
@@ -56,35 +56,105 @@ public extension NSGradient {
     self.init(
       colors: objects.map { $0.0 },
       atLocations: objects.map { $0.1 },
-      colorSpace: NSColorSpace.genericRGBColorSpace())
+      colorSpace: NSColorSpace.genericRGB)
   }
 }
 
 // Fix the ARGV type of NSApplicationMain, which nonsensically takes
 // argv as a const char**.
-@_silgen_name("NSApplicationMain")
 public func NSApplicationMain(
-  argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>>
-) -> Int32
+  _ argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
+) -> Int32 {
+  return argv.withMemoryRebound(to: UnsafePointer<CChar>.self, capacity: Int(argc)) {
+    __NSApplicationMain(argc, $0)
+  }
+}
 
-extension NSColor : _ColorLiteralConvertible {
-  public required convenience init(colorLiteralRed red: Float, green: Float,
+extension NSApplication {
+  @available(swift 4)
+  public static func loadApplication() {
+    __NSApplicationLoad()
+  }
+}
+
+extension NSColor : _ExpressibleByColorLiteral {
+  @nonobjc
+  public required convenience init(_colorLiteralRed red: Float, green: Float,
                                    blue: Float, alpha: Float) {
-    self.init(SRGBRed: CGFloat(red), green: CGFloat(green),
+    self.init(red: CGFloat(red), green: CGFloat(green),
               blue: CGFloat(blue), alpha: CGFloat(alpha))
   }
 }
 
 public typealias _ColorLiteralType = NSColor
 
-extension NSImage : _ImageLiteralConvertible {
+extension NSImage : _ExpressibleByImageLiteral {
   private convenience init!(failableImageLiteral name: String) {
-    self.init(named: name)
+    self.init(named: .init(name))
   }
 
-  public required convenience init(imageLiteral name: String) {
+  @nonobjc
+  public required convenience init(imageLiteralResourceName name: String) {
     self.init(failableImageLiteral: name)
   }
 }
 
 public typealias _ImageLiteralType = NSImage
+
+// Numeric backed types
+
+@available(swift 4)
+public protocol _AppKitKitNumericRawRepresentable : RawRepresentable, Comparable
+  where RawValue: Comparable & Numeric { }
+
+extension _AppKitKitNumericRawRepresentable {
+  public static func <(lhs: Self, rhs: Self) -> Bool {
+    return lhs.rawValue < rhs.rawValue
+  }
+
+  public static func +(lhs: Self, rhs: RawValue) -> Self {
+    return Self(rawValue: lhs.rawValue + rhs)!
+  }
+
+  public static func +(lhs: RawValue, rhs: Self) -> Self {
+    return Self(rawValue: lhs + rhs.rawValue)!
+  }
+
+  public static func -(lhs: Self, rhs: RawValue) -> Self {
+    return Self(rawValue: lhs.rawValue - rhs)!
+  }
+
+  public static func -(lhs: Self, rhs: Self) -> RawValue {
+    return lhs.rawValue - rhs.rawValue
+  }
+
+  public static func +=(lhs: inout Self, rhs: RawValue) {
+    lhs = Self(rawValue: lhs.rawValue + rhs)!
+  }
+
+  public static func -=(lhs: inout Self, rhs: RawValue) {
+    lhs = Self(rawValue: lhs.rawValue - rhs)!
+  }
+}
+
+@available(swift 4)
+extension NSAppKitVersion : _AppKitKitNumericRawRepresentable { }
+
+@available(swift 4)
+extension NSLayoutConstraint.Priority : _AppKitKitNumericRawRepresentable { }
+
+@available(swift 4)
+extension NSStackView.VisibilityPriority : _AppKitKitNumericRawRepresentable { }
+
+@available(swift 4)
+extension NSToolbarItem.VisibilityPriority : _AppKitKitNumericRawRepresentable { }
+
+@available(macOS 10.12.2, *)
+@available(swift 4)
+extension NSTouchBarItem.Priority : _AppKitKitNumericRawRepresentable { }
+
+@available(swift 4)
+extension NSWindow.Level : _AppKitKitNumericRawRepresentable { }
+
+@available(swift 4)
+extension NSFont.Weight : _AppKitKitNumericRawRepresentable { }

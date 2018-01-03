@@ -1,4 +1,8 @@
-// RUN: not %target-swift-frontend -emit-sil %s 2>&1 | FileCheck --check-prefix=CHECK-%target-ptrsize %s
+// FIXME(integer): with new integer protocols implemented the overflows are no
+// longer caught: <rdar://problem/29937936>
+// XFAIL: *
+
+// RUN: not %target-swift-frontend -emit-sil %s 2>&1 | %FileCheck --check-prefix=CHECK-%target-ptrsize %s
 
 // FIXME: This test should be merged back into
 // diagnostic_constant_propagation.swift when we have fixed:
@@ -265,7 +269,7 @@ func testArithmeticOverflow_UInt_32bit() {
   }
 }
 
-#elseif arch(x86_64) || arch(arm64) || arch(powerpc64) || arch(powerpc64le)
+#elseif arch(x86_64) || arch(arm64) || arch(powerpc64) || arch(powerpc64le) || arch(s390x)
 
 func testArithmeticOverflow_Int_64bit() {
   do {

@@ -6,13 +6,6 @@
 
 import StdlibUnittest
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-import SwiftPrivate
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
 import CoreMedia
 
@@ -52,9 +45,9 @@ CMTimeTests.test("isNumeric") {
 
   expectEqual(0.1, t1.seconds)
 
-  t1.convertScale(100, method: CMTimeRoundingMethod.Default)
+  t1.convertScale(100, method: CMTimeRoundingMethod.`default`)
 
-  var t1a = t1.convertScale(11, method: CMTimeRoundingMethod.Default)
+  var t1a = t1.convertScale(11, method: CMTimeRoundingMethod.`default`)
   expectTrue(t1a.hasBeenRounded)
 }
 

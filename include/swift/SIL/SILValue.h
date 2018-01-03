@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,78 +18,189 @@
 #define SWIFT_SIL_SILVALUE_H
 
 #include "swift/Basic/Range.h"
+#include "swift/Basic/ArrayRefView.h"
+#include "swift/SIL/SILNode.h"
 #include "swift/SIL/SILType.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/PointerUnion.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace swift {
-  class Operand;
-  class ValueBaseUseIterator;
-  class ValueUseIterator;
-  class SILBasicBlock;
-  class SILInstruction;
-  class SILLocation;
-  class DominanceInfo;
 
-  enum class ValueKind {
-#define VALUE(Id, Parent) Id,
-#define VALUE_RANGE(Id, FirstId, LastId) \
-    First_##Id = FirstId, Last_##Id = LastId,
+class DominanceInfo;
+class PostOrderFunctionInfo;
+class ReversePostOrderInfo;
+class Operand;
+class SILInstruction;
+class SILLocation;
+class DeadEndBlocks;
+class ValueBaseUseIterator;
+class ValueUseIterator;
+
+/// An enumeration which contains values for all the concrete ValueBase
+/// subclasses.
+enum class ValueKind : std::underlying_type<SILNodeKind>::type {
+#define VALUE(ID, PARENT) \
+  ID = unsigned(SILNodeKind::ID),
+#define VALUE_RANGE(ID, FIRST, LAST) \
+  First_##ID = unsigned(SILNodeKind::First_##ID), \
+  Last_##ID = unsigned(SILNodeKind::Last_##ID),
 #include "swift/SIL/SILNodes.def"
-  };
+};
 
-  /// ValueKind hashes to its underlying integer representation.
-  static inline llvm::hash_code hash_value(ValueKind K) {
-    return llvm::hash_value(size_t(K));
+/// ValueKind hashes to its underlying integer representation.
+static inline llvm::hash_code hash_value(ValueKind K) {
+  return llvm::hash_value(size_t(K));
+}
+
+/// A value representing the specific ownership semantics that a SILValue may
+/// have.
+struct ValueOwnershipKind {
+  enum innerty : uint8_t {
+    /// A SILValue with Trivial ownership kind is an independent value that can
+    /// not be owned. Ownership does not place any constraints on how a SILValue
+    /// with Trivial ownership kind can be used. Other side effects (e.g. Memory
+    /// dependencies) must still be respected. A SILValue with Trivial ownership
+    /// kind must be of Trivial SILType (i.e. SILType::isTrivial(SILModule &)
+    /// must
+    /// return true).
+    ///
+    /// Some examples of SIL types with Trivial ownership are: Builtin.Int32,
+    /// Builtin.RawPointer, aggregates containing all trivial types.
+    Trivial,
+
+    /// A SILValue with `Unowned` ownership kind is an independent value that
+    /// has
+    /// a lifetime that is only guaranteed to last until the next program
+    /// visible
+    /// side-effect. To maintain the lifetime of an unowned value, it must be
+    /// converted to an owned representation via a copy_value.
+    ///
+    /// Unowned ownership kind occurs mainly along method/function boundaries in
+    /// between Swift and Objective-C code.
+    Unowned,
+
+    /// A SILValue with `Owned` ownership kind is an independent value that has
+    /// an
+    /// ownership independent of any other ownership imbued within it. The
+    /// SILValue must be paired with a consuming operation that ends the SSA
+    /// value's lifetime exactly once along all paths through the program.
+    Owned,
+
+    /// A SILValue with `Guaranteed` ownership kind is an independent value that
+    /// is guaranteed to be live over a specific region of the program. This
+    /// region can come in several forms:
+    ///
+    /// 1. @guaranteed function argument. This guarantees that a value will
+    /// outlive a function.
+    ///
+    /// 2. A shared borrow region. This is a region denoted by a
+    /// begin_borrow/load_borrow instruction and an end_borrow instruction. The
+    /// SSA value must not be destroyed or taken inside the borrowed region.
+    ///
+    /// Any value with guaranteed ownership must be paired with an end_borrow
+    /// instruction exactly once along any path through the program.
+    Guaranteed,
+
+    /// A SILValue with undefined ownership. It can pair with /Any/ ownership
+    /// kinds . This means that it could take on /any/ ownership semantics. This
+    /// is meant only to model SILUndef and to express certain situations where
+    /// we
+    /// use unqualified ownership. Expected to tighten over time.
+    Any,
+
+    LastValueOwnershipKind = Any,
+  } Value;
+
+  using UnderlyingType = std::underlying_type<innerty>::type;
+  static constexpr unsigned NumBits = SILNode::NumVOKindBits;
+  static constexpr UnderlyingType MaxValue = (UnderlyingType(1) << NumBits);
+  static constexpr uint64_t Mask = MaxValue - 1;
+  static_assert(unsigned(ValueOwnershipKind::LastValueOwnershipKind) < MaxValue,
+                "LastValueOwnershipKind is larger than max representable "
+                "ownership value?!");
+
+  ValueOwnershipKind(innerty NewValue) : Value(NewValue) {}
+  ValueOwnershipKind(unsigned NewValue) : Value(innerty(NewValue)) {}
+  ValueOwnershipKind(SILModule &M, SILType Type,
+                     SILArgumentConvention Convention);
+
+  /// Parse Value into a ValueOwnershipKind.
+  ///
+  /// *NOTE* Emits an unreachable if an invalid value is passed in.
+  explicit ValueOwnershipKind(StringRef Value);
+
+  operator innerty() const { return Value; }
+
+  Optional<ValueOwnershipKind> merge(ValueOwnershipKind RHS) const;
+
+  bool isTrivialOr(ValueOwnershipKind Kind) const {
+    return Value == Trivial || Value == Kind;
   }
 
-/// ValueBase - This is the base class of the SIL value hierarchy, which
-/// represents a runtime computed value.  Things like SILInstruction derive
-/// from this.
-class alignas(8) ValueBase : public SILAllocated<ValueBase> {
-  SILType Type;
-  Operand *FirstUse = nullptr;
+  /// Given that there is an aggregate value (like a struct or enum) with this
+  /// ownership kind, and a subobject of type Proj is being projected from the
+  /// aggregate, return Trivial if Proj has trivial type and the aggregate's
+  /// ownership kind otherwise.
+  ValueOwnershipKind getProjectedOwnershipKind(SILModule &M,
+                                               SILType Proj) const;
+};
+
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os, ValueOwnershipKind Kind);
+
+/// This is the base class of the SIL value hierarchy, which represents a
+/// runtime computed value. Some examples of ValueBase are SILArgument and
+/// SingleValueInstruction.
+class ValueBase : public SILNode, public SILAllocated<ValueBase> {
   friend class Operand;
 
-  const ValueKind Kind;
+  SILType Type;
+  Operand *FirstUse = nullptr;
 
   ValueBase(const ValueBase &) = delete;
   ValueBase &operator=(const ValueBase &) = delete;
 
 protected:
-  ValueBase(ValueKind Kind, SILType Ty)
-    : Type(Ty), Kind(Kind) {}
+  ValueBase(ValueKind kind, SILType type, IsRepresentative isRepresentative)
+      : SILNode(SILNodeKind(kind), SILNodeStorageLocation::Value,
+                isRepresentative),
+        Type(type) {}
 
 public:
   ~ValueBase() {
     assert(use_empty() && "Cannot destroy a value that still has uses!");
   }
 
-
-  ValueKind getKind() const { return Kind; }
-
-  /// True if the "value" is actually a value that can be used by other
-  /// instructions.
-  bool hasValue() const { return !Type.isNull(); }
+  LLVM_ATTRIBUTE_ALWAYS_INLINE
+  ValueKind getKind() const { return ValueKind(SILNode::getKind()); }
 
   SILType getType() const {
     return Type;
   }
 
   /// Replace every use of a result of this instruction with the corresponding
-  /// result from RHS. The method assumes that both instructions have the same
-  /// number of results. To replace just one result use
-  /// SILValue::replaceAllUsesWith.
+  /// result from RHS.
+  ///
+  /// The method assumes that both instructions have the same number of
+  /// results. To replace just one result use SILValue::replaceAllUsesWith.
   void replaceAllUsesWith(ValueBase *RHS);
 
+  /// \brief Replace all uses of this instruction with an undef value of the
+  /// same type as the result of this instruction.
+  void replaceAllUsesWithUndef();
+
+  /// Is this value a direct result of the given instruction?
+  bool isResultOf(SILInstruction *I) const;
+
   /// Returns true if this value has no uses.
-  /// To ignore debug-info instructions use swift::hasNoUsesExceptDebug instead
+  /// To ignore debug-info instructions use swift::onlyHaveDebugUses instead
   /// (see comment in DebugUtils.h).
   bool use_empty() const { return FirstUse == nullptr; }
 
   using use_iterator = ValueBaseUseIterator;
+  using use_range = iterator_range<use_iterator>;
 
   inline use_iterator use_begin() const;
   inline use_iterator use_end() const;
@@ -97,38 +208,50 @@ public:
   /// Returns a range of all uses, which is useful for iterating over all uses.
   /// To ignore debug-info instructions use swift::getNonDebugUses instead
   /// (see comment in DebugUtils.h).
-  inline iterator_range<use_iterator> getUses() const;
+  inline use_range getUses() const;
 
   /// Returns true if this value has exactly one use.
   /// To ignore debug-info instructions use swift::hasOneNonDebugUse instead
   /// (see comment in DebugUtils.h).
   inline bool hasOneUse() const;
 
-  /// Pretty-print the value.
-  void dump() const;
-  void print(raw_ostream &OS) const;
+  /// Returns .some(single user) if this value has a single user. Returns .none
+  /// otherwise.
+  inline Operand *getSingleUse() const;
 
-  /// Pretty-print the value in context, preceded by its operands (if the
-  /// value represents the result of an instruction) and followed by its
-  /// users.
-  void dumpInContext() const;
-  void printInContext(raw_ostream &OS) const;
+  template <class T>
+  inline T *getSingleUserOfType();
 
+  /// Return the instruction that defines this value, or null if it is
+  /// not defined by an instruction.
+  const SILInstruction *getDefiningInstruction() const {
+    return const_cast<ValueBase*>(this)->getDefiningInstruction();
+  }
+  SILInstruction *getDefiningInstruction();
+
+  struct DefiningInstructionResult {
+    SILInstruction *Instruction;
+    size_t ResultIndex;
+  };
+
+  /// Return the instruction that defines this value and the appropriate
+  /// result index, or None if it is not defined by an instruction.
+  Optional<DefiningInstructionResult> getDefiningInstructionResult();
+
+  static bool classof(const SILNode *N) {
+    return N->getKind() >= SILNodeKind::First_ValueBase &&
+           N->getKind() <= SILNodeKind::Last_ValueBase;
+  }
   static bool classof(const ValueBase *V) { return true; }
 
-  /// If this is a SILArgument or a SILInstruction get its parent basic block,
-  /// otherwise return null.
-  SILBasicBlock *getParentBB();
+  /// This is supportable but usually suggests a logic mistake.
+  static bool classof(const SILInstruction *) = delete;
 };
 
-inline llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
-                                     const ValueBase &V) {
-  V.print(OS);
-  return OS;
-}
-}  // end namespace swift
+} // end namespace swift
 
 namespace llvm {
+
 /// ValueBase * is always at least eight-byte aligned; make the three tag bits
 /// available through PointerLikeTypeTraits.
 template<>
@@ -142,6 +265,7 @@ public:
   }
   enum { NumLowBitsAvailable = 3 };
 };
+
 } // end namespace llvm
 
 namespace swift {
@@ -152,7 +276,7 @@ class SILValue {
 
 public:
   SILValue(const ValueBase *V = nullptr)
-    : Value((ValueBase *)V) { }
+    : Value(const_cast<ValueBase *>(V)) { }
 
   ValueBase *operator->() const { return Value; }
   ValueBase &operator*() const { return *Value; }
@@ -167,6 +291,9 @@ public:
   /// Return true if underlying ValueBase of this SILValue is non-null. Return
   /// false otherwise.
   explicit operator bool() const { return Value != nullptr; }
+
+  /// Get a location for this value.
+  SILLocation getLoc() const;
 
   /// Convert this SILValue into an opaque pointer like type. For use with
   /// PointerLikeTypeTraits.
@@ -185,6 +312,18 @@ public:
     llvm::PointerLikeTypeTraits<ValueBase *>::
           NumLowBitsAvailable
   };
+
+  /// Returns the ValueOwnershipKind that describes this SILValue's ownership
+  /// semantics if the SILValue has ownership semantics. Returns is a value
+  /// without any Ownership Semantics.
+  ///
+  /// An example of a SILValue without ownership semantics is a
+  /// struct_element_addr.
+  ValueOwnershipKind getOwnershipKind() const;
+
+  /// Verify that this SILValue and its uses respects ownership invariants.
+  void verifyOwnership(SILModule &Mod,
+                       DeadEndBlocks *DEBlocks = nullptr) const;
 };
 
 /// A formal SIL reference to a value, suitable for use as a stored
@@ -206,15 +345,13 @@ class Operand {
   /// FIXME: this could be space-compressed.
   SILInstruction *Owner;
 
+public:
   Operand(SILInstruction *owner) : Owner(owner) {}
   Operand(SILInstruction *owner, SILValue theValue)
       : TheValue(theValue), Owner(owner) {
     insertIntoCurrent();
   }
-  template<unsigned N> friend class FixedOperandList;
-  template<unsigned N> friend class TailAllocatedOperandList;
 
-public:
   /// Operands are not copyable.
   Operand(const Operand &use) = delete;
   Operand &operator=(const Operand &use) = delete;
@@ -227,8 +364,6 @@ public:
     // It's probably not worth optimizing for the case of switching
     // operands on a single value.
     removeFromCurrent();
-    assert(reinterpret_cast<ValueBase *>(Owner) != newValue &&
-        "Cannot add a value as an operand of the instruction that defines it!");
     TheValue = newValue;
     insertIntoCurrent();
   }
@@ -278,69 +413,17 @@ private:
   friend class ValueBaseUseIterator;
   friend class ValueUseIterator;
   template <unsigned N> friend class FixedOperandList;
-  template <unsigned N> friend class TailAllocatedOperandList;
+  friend class TrailingOperandsList;
 };
 
 /// A class which adapts an array of Operands into an array of Values.
 ///
 /// The intent is that this should basically act exactly like
 /// ArrayRef except projecting away the Operand-ness.
-class OperandValueArrayRef {
-  ArrayRef<Operand> Operands;
-public:
-  explicit OperandValueArrayRef(ArrayRef<Operand> operands)
-    : Operands(operands) {}
-
-  /// A simple iterator adapter.
-  class iterator {
-    const Operand *Ptr;
-  public:
-    iterator(const Operand *ptr) : Ptr(ptr) {}
-    SILValue operator*() const { assert(Ptr); return Ptr->get(); }
-    SILValue operator->() const { return operator*(); }
-    iterator &operator++() { ++Ptr; return *this; }
-    iterator operator++(int) { iterator copy = *this; ++Ptr; return copy; }
-
-    friend bool operator==(iterator lhs, iterator rhs) {
-      return lhs.Ptr == rhs.Ptr;
-    }
-    friend bool operator!=(iterator lhs, iterator rhs) {
-      return lhs.Ptr != rhs.Ptr;
-    }
-  };
-
-  iterator begin() const { return iterator(Operands.begin()); }
-  iterator end() const { return iterator(Operands.end()); }
-  size_t size() const { return Operands.size(); }
-  bool empty() const { return Operands.empty(); }
-
-  SILValue front() const { return Operands.front().get(); }
-  SILValue back() const { return Operands.back().get(); }
-
-  SILValue operator[](unsigned i) const { return Operands[i].get(); }
-  OperandValueArrayRef slice(unsigned begin, unsigned length) const {
-    return OperandValueArrayRef(Operands.slice(begin, length));
-  }
-  OperandValueArrayRef slice(unsigned begin) const {
-    return OperandValueArrayRef(Operands.slice(begin));
-  }
-  OperandValueArrayRef drop_back() const {
-    return OperandValueArrayRef(Operands.drop_back());
-  }
-
-  bool operator==(const OperandValueArrayRef RHS) const {
-    if (size() != RHS.size())
-      return false;
-    for (auto L = begin(), LE = end(), R = RHS.begin(); L != LE; ++L, ++R)
-      if (*L != *R)
-        return false;
-    return true;
-  }
-
-  bool operator!=(const OperandValueArrayRef RHS) const {
-    return !(*this == RHS);
-  }
-};
+inline SILValue getSILValueType(const Operand &op) {
+  return op.get();
+}
+typedef ArrayRefView<Operand,SILValue,getSILValueType> OperandValueArrayRef;
 
 /// An iterator over all uses of a ValueBase.
 class ValueBaseUseIterator : public std::iterator<std::forward_iterator_tag,
@@ -391,6 +474,36 @@ inline bool ValueBase::hasOneUse() const {
   if (I == E) return false;
   return ++I == E;
 }
+inline Operand *ValueBase::getSingleUse() const {
+  auto I = use_begin(), E = use_end();
+
+  // If we have no elements, return nullptr.
+  if (I == E) return nullptr;
+
+  // Otherwise, grab the first element and then increment.
+  Operand *Op = *I;
+  ++I;
+
+  // If the next element is not the end list, then return nullptr. We do not
+  // have one user.
+  if (I != E) return nullptr;
+
+  // Otherwise, the element that we accessed.
+  return Op;
+}
+
+template <class T>
+inline T *ValueBase::getSingleUserOfType() {
+  T *Result = nullptr;
+  for (auto *Op : getUses()) {
+    if (auto *Tmp = dyn_cast<T>(Op->getUser())) {
+      if (Result)
+        return nullptr;
+      Result = Tmp;
+    }
+  }
+  return Result;
+}
 
 /// A constant-size list of the operands of an instruction.
 template <unsigned N> class FixedOperandList {
@@ -423,149 +536,35 @@ public:
   const Operand &operator[](unsigned i) const { return asArray()[i]; }
 };
 
-/// An operator list with a fixed number of known operands
-/// (possibly zero) and a dynamically-determined set of extra
-/// operands (also possibly zero).  The number of dynamic operands
-/// is permanently set at initialization time.
-///
-/// 'N' is the number of static operands.
-///
-/// This class assumes that a number of bytes of extra storage have
-/// been allocated immediately after it.  This means that this class
-/// must always be the final data member in a class.
-template <unsigned N> class TailAllocatedOperandList {
-  unsigned NumExtra;
-  Operand Buffer[N];
-
-  TailAllocatedOperandList(const TailAllocatedOperandList &) = delete;
-  TailAllocatedOperandList &operator=(const TailAllocatedOperandList &) =delete;
-
+/// A helper class for initializing the list of trailing operands.
+class TrailingOperandsList {
 public:
-  /// Given the number of dynamic operands required, returns the
-  /// number of bytes of extra storage to allocate.
-  static size_t getExtraSize(unsigned numExtra) {
-    return sizeof(Operand) * numExtra;
+  static void InitOperandsList(Operand *p, SILInstruction *user,
+                               SILValue operand, ArrayRef<SILValue> operands) {
+    assert(p && "Trying to initialize operands using a nullptr");
+    new (p++) Operand(user, operand);
+    for (auto op : operands) {
+      new (p++) Operand(user, op);
+    }
   }
-
-  /// Initialize this operand list.
-  ///
-  /// The dynamic operands are actually out of order: logically they
-  /// will placed after the fixed operands, not before them.  But
-  /// the variadic arguments have to come last.
-  template <class... T>
-  TailAllocatedOperandList(SILInstruction *user,
-                           ArrayRef<SILValue> dynamicArgs,
-                           T&&... fixedArgs)
-      : NumExtra(dynamicArgs.size()),
-        Buffer{ { user, std::forward<T>(fixedArgs) }... } {
-    static_assert(sizeof...(fixedArgs) == N, "wrong number of initializers");
-
-    Operand *dynamicSlot = Buffer + N;
-    for (auto value : dynamicArgs) {
-      new (dynamicSlot++) Operand(user, value);
+  static void InitOperandsList(Operand *p, SILInstruction *user,
+                               SILValue operand0, SILValue operand1,
+                               ArrayRef<SILValue> operands) {
+    assert(p && "Trying to initialize operands using a nullptr");
+    new (p++) Operand(user, operand0);
+    new (p++) Operand(user, operand1);
+    for (auto op : operands) {
+      new (p++) Operand(user, op);
     }
   }
 
-  ~TailAllocatedOperandList() {
-    for (auto &op : getDynamicAsArray()) {
-      op.~Operand();
+  static void InitOperandsList(Operand *p, SILInstruction *user,
+                               ArrayRef<SILValue> operands) {
+    assert(p && "Trying to initialize operands using a nullptr");
+    for (auto op : operands) {
+      new (p++) Operand(user, op);
     }
   }
-
-  /// Returns the full list of operands.
-  MutableArrayRef<Operand> asArray() {
-    return MutableArrayRef<Operand>(Buffer, N+NumExtra);
-  }
-  ArrayRef<Operand> asArray() const {
-    return ArrayRef<Operand>(Buffer, N+NumExtra);
-  }
-
-  /// Returns the full list of operand values.
-  OperandValueArrayRef asValueArray() const {
-    return OperandValueArrayRef(asArray());
-  }
-
-  /// Returns the list of the dynamic operands.
-  MutableArrayRef<Operand> getDynamicAsArray() {
-    return MutableArrayRef<Operand>(Buffer+N, NumExtra);
-  }
-  ArrayRef<Operand> getDynamicAsArray() const {
-    return ArrayRef<Operand>(Buffer+N, NumExtra);
-  }
-
-  /// Returns the list of the dynamic operand values.
-  OperandValueArrayRef getDynamicValuesAsArray() const {
-    return OperandValueArrayRef(getDynamicAsArray());
-  }
-
-  unsigned size() const { return N+NumExtra; }
-
-  /// Indexes into the full list of operands.
-  Operand &operator[](unsigned i) { return asArray()[i]; }
-  const Operand &operator[](unsigned i) const { return asArray()[i]; }
-};
-
-/// A specialization of TailAllocatedOperandList for zero static operands.
-template<> class TailAllocatedOperandList<0> {
-  unsigned NumExtra;
-  union { // suppress value semantics
-    Operand Buffer[1];
-  };
-
-  TailAllocatedOperandList(const TailAllocatedOperandList &) = delete;
-  TailAllocatedOperandList &operator=(const TailAllocatedOperandList &) =delete;
-
-public:
-  static size_t getExtraSize(unsigned numExtra) {
-    return sizeof(Operand) * (numExtra > 0 ? numExtra - 1 : 0);
-  }
-
-  TailAllocatedOperandList(SILInstruction *user, ArrayRef<SILValue> dynamicArgs)
-      : NumExtra(dynamicArgs.size()) {
-
-    Operand *dynamicSlot = Buffer;
-    for (auto value : dynamicArgs) {
-      new (dynamicSlot++) Operand(user, value);
-    }
-  }
-
-  ~TailAllocatedOperandList() {
-    for (auto &op : getDynamicAsArray()) {
-      op.~Operand();
-    }
-  }
-
-  /// Returns the full list of operands.
-  MutableArrayRef<Operand> asArray() {
-    return MutableArrayRef<Operand>(Buffer, NumExtra);
-  }
-  ArrayRef<Operand> asArray() const {
-    return ArrayRef<Operand>(Buffer, NumExtra);
-  }
-
-  /// Returns the full list of operand values.
-  OperandValueArrayRef asValueArray() const {
-    return OperandValueArrayRef(asArray());
-  }
-
-  /// Returns the list of the dynamic operands.
-  MutableArrayRef<Operand> getDynamicAsArray() {
-    return MutableArrayRef<Operand>(Buffer, NumExtra);
-  }
-  ArrayRef<Operand> getDynamicAsArray() const {
-    return ArrayRef<Operand>(Buffer, NumExtra);
-  }
-
-  /// Returns the list of the dynamic operand values.
-  OperandValueArrayRef getDynamicValuesAsArray() const {
-    return OperandValueArrayRef(getDynamicAsArray());
-  }
-
-  unsigned size() const { return NumExtra; }
-
-  /// Indexes into the full list of operands.
-  Operand &operator[](unsigned i) { return asArray()[i]; }
-  const Operand &operator[](unsigned i) const { return asArray()[i]; }
 };
 
 /// SILValue hashes just like a pointer.
@@ -624,6 +623,6 @@ namespace llvm {
     enum { NumLowBitsAvailable = swift::SILValue::NumLowBitsAvailable };
   };
 
-}  // end namespace llvm
+} // end namespace llvm
 
 #endif

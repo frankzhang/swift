@@ -1,30 +1,80 @@
-//===--- Filter.swift -----------------------------------------------------===//
+//===--- Filter.swift -----------------------------------------*- swift -*-===//
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 
-/// A generator that produces the elements produced by some base
-/// generator that also satisfy a given predicate.
+
+/// A sequence whose elements consist of the elements of some base
+/// sequence that also satisfy a given predicate.
 ///
-/// - Note: This is the associated `Generator` of `LazyFilterSequence`
-/// and `LazyFilterCollection`.
-public struct LazyFilterGenerator<
-  Base : GeneratorType
-> : GeneratorType, SequenceType {
-  /// Advances to the next element and returns it, or `nil` if no next
-  /// element exists.
+/// - Note: `s.lazy.filter { ... }`, for an arbitrary sequence `s`,
+///   is a `LazyFilterSequence`.
+@_fixed_layout // FIXME(sil-serialize-all)
+public struct LazyFilterSequence<Base: Sequence> {
+  @_versioned // FIXME(sil-serialize-all)
+  internal var _base: Base
+
+  /// The predicate used to determine which elements produced by
+  /// `base` are also produced by `self`.
+  @_versioned // FIXME(sil-serialize-all)
+  internal let _predicate: (Base.Element) -> Bool
+
+  /// Creates an instance consisting of the elements `x` of `base` for
+  /// which `isIncluded(x) == true`.
+  @_inlineable // FIXME(sil-serialize-all)
+  public // @testable
+  init(_base base: Base, _ isIncluded: @escaping (Base.Element) -> Bool) {
+    self._base = base
+    self._predicate = isIncluded
+  }
+}
+
+extension LazyFilterSequence {
+  /// An iterator over the elements traversed by some base iterator that also
+  /// satisfy a given predicate.
   ///
-  /// - Requires: `next()` has not been applied to a copy of `self`
-  ///   since the copy was made, and no preceding call to `self.next()`
-  ///   has returned `nil`.
-  public mutating func next() -> Base.Element? {
+  /// - Note: This is the associated `Iterator` of `LazyFilterSequence`
+  /// and `LazyFilterCollection`.
+  @_fixed_layout // FIXME(sil-serialize-all)
+  public struct Iterator {
+    /// The underlying iterator whose elements are being filtered.
+    public var base: Base.Iterator { return _base }
+
+    @_versioned // FIXME(sil-serialize-all)
+    internal var _base: Base.Iterator
+    @_versioned // FIXME(sil-serialize-all)
+    internal let _predicate: (Base.Element) -> Bool
+
+    /// Creates an instance that produces the elements `x` of `base`
+    /// for which `isIncluded(x) == true`.
+    @_inlineable // FIXME(sil-serialize-all)
+    @_versioned // FIXME(sil-serialize-all)
+    internal init(_base: Base.Iterator, _ isIncluded: @escaping (Base.Element) -> Bool) {
+      self._base = _base
+      self._predicate = isIncluded
+    }
+  }
+}
+
+extension LazyFilterSequence.Iterator: IteratorProtocol, Sequence {
+  public typealias Element = Base.Element
+  
+  /// Advances to the next element and returns it, or `nil` if no next element
+  /// exists.
+  ///
+  /// Once `nil` has been returned, all subsequent calls return `nil`.
+  ///
+  /// - Precondition: `next()` has not been applied to a copy of `self`
+  ///   since the copy was made.
+  @_inlineable // FIXME(sil-serialize-all)
+  public mutating func next() -> Element? {
     while let n = _base.next() {
       if _predicate(n) {
         return n
@@ -32,248 +82,311 @@ public struct LazyFilterGenerator<
     }
     return nil
   }
-
-  /// Creates an instance that produces the elements `x` of `base`
-  /// for which `predicate(x) == true`.
-  public init(
-    _ base: Base,
-    whereElementsSatisfy predicate: (Base.Element) -> Bool
-  ) {
-    self._base = base
-    self._predicate = predicate
-  }
-
-  /// The underlying generator whose elements are being filtered
-  public var base: Base { return _base }
-
-  internal var _base: Base
-  
-  /// The predicate used to determine which elements produced by
-  /// `base` are also produced by `self`.
-  internal var _predicate: (Base.Element) -> Bool
 }
 
-/// A sequence whose elements consist of the elements of some base
-/// sequence that also satisfy a given predicate.
-///
-/// - Note: `s.lazy.filter { ... }`, for an arbitrary sequence `s`,
-///   is a `LazyFilterSequence`.
-public struct LazyFilterSequence<Base : SequenceType>
-  : LazySequenceType {
-  
-  /// Return a *generator* over the elements of this *sequence*.
+extension LazyFilterSequence: LazySequenceProtocol {
+  /// Returns an iterator over the elements of this sequence.
   ///
   /// - Complexity: O(1).
-  public func generate() -> LazyFilterGenerator<Base.Generator> {
-    return LazyFilterGenerator(
-      base.generate(), whereElementsSatisfy: _include)
+  @_inlineable // FIXME(sil-serialize-all)
+  public func makeIterator() -> Iterator {
+    return Iterator(_base: _base.makeIterator(), _predicate)
   }
 
-  /// Creates an instance consisting of the elements `x` of `base` for
-  /// which `predicate(x) == true`.
-  public init(
-    _ base: Base,
-    whereElementsSatisfy predicate: (Base.Generator.Element) -> Bool
-  ) {
-    self.base = base
-    self._include = predicate
+  @_inlineable
+  public func _customContainsEquatableElement(_ element: Element) -> Bool? {
+    // optimization to check the element first matches the predicate
+    guard _predicate(element) else { return false }
+    return _base._customContainsEquatableElement(element)
   }
-
-  /// The underlying sequence whose elements are being filtered
-  public let base: Base
-
-  /// The predicate used to determine which elements of `base` are
-  /// also elements of `self`.
-  internal let _include: (Base.Generator.Element) -> Bool
 }
 
-/// The `Index` used for subscripting a `LazyFilterCollection`.
-///
-/// The positions of a `LazyFilterIndex` correspond to those positions
-/// `p` in its underlying collection `c` such that `c[p]`
-/// satisfies the predicate with which the `LazyFilterIndex` was
-/// initialized.
-/// 
-/// - Note: The performance of advancing a `LazyFilterIndex`
-///   depends on how sparsely the filtering predicate is satisfied,
-///   and may not offer the usual performance given by models of
-///   `ForwardIndexType`.
-public struct LazyFilterIndex<
-  BaseElements: CollectionType
-> : ForwardIndexType {
-  /// Returns the next consecutive value after `self`.
-  ///
-  /// - Requires: The next value is representable.
-  ///
-  /// - Complexity: Amortized O(M), where M is the average distance in
-  ///   the base collection between elements that satisfy the
-  ///   predicate.
-  ///
-  /// - Note: This operation may not satisfy the expected complexity
-  ///   for models of `ForwardIndexType`.
-  public func successor() -> LazyFilterIndex {
-    for p in base.successor()..<_baseElements.endIndex {
-      if _include(_baseElements[p]) {
-        return LazyFilterIndex(
-          _baseElements: _baseElements, base: p, _include: _include)
-      }
-    }
-    return LazyFilterIndex(
-      _baseElements: _baseElements, base: _baseElements.endIndex,
-      _include: _include)
-  }
-
-  internal let _baseElements: BaseElements
-
-  /// The position corresponding to `self` in the underlying collection.
-  public let base: BaseElements.Index
-
-  /// The predicate used to determine which elements of `base` are
-  /// also elements of `self`.
-  internal let _include: (BaseElements.Generator.Element) -> Bool
-
-  @available(*, unavailable, renamed="BaseElements")
-  public typealias Base = BaseElements
-}
-
-/// Returns `true` iff `lhs` is identical to `rhs`.
-@warn_unused_result
-public func == <Base : CollectionType>(
-  lhs: LazyFilterIndex<Base>,
-  rhs: LazyFilterIndex<Base>
-) -> Bool {
-  return lhs.base == rhs.base
-}
-
-/// A lazy `CollectionType` wrapper that includes the elements of an
+/// A lazy `Collection` wrapper that includes the elements of an
 /// underlying collection that satisfy a predicate.
 ///
 /// - Note: The performance of accessing `startIndex`, `first`, any methods
-///   that depend on `startIndex`, or of advancing a `LazyFilterIndex` depends
+///   that depend on `startIndex`, or of advancing an index depends
 ///   on how sparsely the filtering predicate is satisfied, and may not offer
-///   the usual performance given by `CollectionType` or `ForwardIndexType`. Be
-///   aware, therefore, that general operations on `LazyFilterCollection`
-///   instances may not have the documented complexity.
-public struct LazyFilterCollection<
-  Base : CollectionType
-> : LazyCollectionType {
+///   the usual performance given by `Collection`. Be aware, therefore, that
+///   general operations on `LazyFilterCollection` instances may not have the
+///   documented complexity.
+@_fixed_layout // FIXME(sil-serialize-all)
+public struct LazyFilterCollection<Base : Collection> {
+  @_versioned // FIXME(sil-serialize-all)
+  internal var _base: Base
+  @_versioned // FIXME(sil-serialize-all)
+  internal let _predicate: (Base.Element) -> Bool
 
+  /// Creates an instance containing the elements of `base` that
+  /// satisfy `isIncluded`.
+  @_inlineable // FIXME(sil-serialize-all)
+  public // @testable
+  init(_base: Base, _ isIncluded: @escaping (Base.Element) -> Bool) {
+    self._base = _base
+    self._predicate = isIncluded
+  }
+}
+
+extension LazyFilterCollection : LazySequenceProtocol {
+  public typealias Element = Base.Element
+  public typealias Iterator = LazyFilterSequence<Base>.Iterator
+  public typealias SubSequence = LazyFilterCollection<Base.SubSequence>
+
+  // Any estimate of the number of elements that pass `_predicate` requires
+  // iterating the collection and evaluating each element, which can be costly,
+  // is unexpected, and usually doesn't pay for itself in saving time through
+  // preventing intermediate reallocations. (SR-4164)
+  @_inlineable // FIXME(sil-serialize-all)
+  public var underestimatedCount: Int { return 0 }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func _copyToContiguousArray() -> ContiguousArray<Base.Element> {
+
+    // The default implementation of `_copyToContiguousArray` queries the
+    // `count` property, which evaluates `_predicate` for every element --
+    // see the note above `underestimatedCount`. Here we treat `self` as a
+    // sequence and only rely on underestimated count.
+    return _copySequenceToContiguousArray(self)
+  }
+
+  /// Returns an iterator over the elements of this sequence.
+  ///
+  /// - Complexity: O(1).
+  @_inlineable // FIXME(sil-serialize-all)
+  public func makeIterator() -> Iterator {
+    return Iterator(_base: _base.makeIterator(), _predicate)
+  }
+
+  @_inlineable
+  public func _customContainsEquatableElement(_ element: Element) -> Bool? {
+    guard _predicate(element) else { return false }
+    return _base._customContainsEquatableElement(element)
+  }
+}
+
+extension LazyFilterCollection : LazyCollectionProtocol {
   /// A type that represents a valid position in the collection.
   ///
   /// Valid indices consist of the position of every element and a
   /// "past the end" position that's not valid for use as a subscript.
-  public typealias Index = LazyFilterIndex<Base>
-
-  /// Construct an instance containing the elements of `base` that
-  /// satisfy `predicate`.
-  public init(
-    _ base: Base,
-    whereElementsSatisfy predicate: (Base.Generator.Element) -> Bool
-  ) {
-    self._base = base
-    self._predicate = predicate
-  }
+  public typealias Index = Base.Index
 
   /// The position of the first element in a non-empty collection.
   ///
   /// In an empty collection, `startIndex == endIndex`.
   ///
-  /// - Complexity: O(N), where N is the ratio between unfiltered and
+  /// - Complexity: O(*n*), where *n* is the ratio between unfiltered and
   ///   filtered collection counts.
+  @_inlineable // FIXME(sil-serialize-all)
   public var startIndex: Index {
-    var first = _base.startIndex
-    while first != _base.endIndex {
-      if _predicate(_base[first]) {
-        break
-      }
-      first._successorInPlace()
+    var index = _base.startIndex
+    while index != _base.endIndex && !_predicate(_base[index]) {
+      _base.formIndex(after: &index)
     }
-    return LazyFilterIndex(
-      _baseElements: _base, base: first, _include: _predicate)
+    return index
   }
 
-  /// The collection's "past the end" position.
+  /// The collection's "past the end" position---that is, the position one
+  /// greater than the last valid subscript argument.
   ///
-  /// `endIndex` is not a valid argument to `subscript`, and is always
-  /// reachable from `startIndex` by zero or more applications of
-  /// `successor()`.
-  ///
-  /// - Complexity: O(1).
+  /// `endIndex` is always reachable from `startIndex` by zero or more
+  /// applications of `index(after:)`.
+  @_inlineable // FIXME(sil-serialize-all)
   public var endIndex: Index {
-    return LazyFilterIndex(
-      _baseElements: _base, base: _base.endIndex, _include: _predicate)
+    return _base.endIndex
   }
 
-  /// Access the element at `position`.
+  // TODO: swift-3-indexing-model - add docs
+  @_inlineable // FIXME(sil-serialize-all)
+  public func index(after i: Index) -> Index {
+    var i = i
+    formIndex(after: &i)
+    return i
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func formIndex(after i: inout Index) {
+    // TODO: swift-3-indexing-model: _failEarlyRangeCheck i?
+    var index = i
+    _precondition(index != _base.endIndex, "Can't advance past endIndex")
+    repeat {
+      _base.formIndex(after: &index)
+    } while index != _base.endIndex && !_predicate(_base[index])
+    i = index
+  }
+
+  @inline(__always)
+  @_inlineable // FIXME(sil-serialize-all)
+  @_versioned // FIXME(sil-serialize-all)
+  internal func _advanceIndex(_ i: inout Index, step: Int) {
+    repeat {
+      _base.formIndex(&i, offsetBy: step)
+    } while i != _base.endIndex && !_predicate(_base[i])
+  }
+
+  @inline(__always)
+  @_inlineable // FIXME(sil-serialize-all)
+  @_versioned // FIXME(sil-serialize-all)
+  internal func _ensureBidirectional(step: Int) {
+    // FIXME: This seems to be the best way of checking whether _base is
+    // forward only without adding an extra protocol requirement.
+    // index(_:offsetBy:limitedBy:) is chosen becuase it is supposed to return
+    // nil when the resulting index lands outside the collection boundaries,
+    // and therefore likely does not trap in these cases.
+    if step < 0 {
+      _ = _base.index(
+        _base.endIndex, offsetBy: step, limitedBy: _base.startIndex)
+    }
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func distance(from start: Index, to end: Index) -> Int {
+    // The following line makes sure that distance(from:to:) is invoked on the
+    // _base at least once, to trigger a _precondition in forward only
+    // collections.
+    _ = _base.distance(from: start, to: end)
+    var _start: Index
+    let _end: Index
+    let step: Int
+    if start > end {
+      _start = end
+      _end = start
+      step = -1
+    }
+    else {
+      _start = start
+      _end = end
+      step = 1
+    }
+    var count = 0
+    while _start != _end {
+      count += step
+      formIndex(after: &_start)
+    }
+    return count
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func index(_ i: Index, offsetBy n: Int) -> Index {
+    var i = i
+    let step = n.signum()
+    // The following line makes sure that index(_:offsetBy:) is invoked on the
+    // _base at least once, to trigger a _precondition in forward only
+    // collections.
+    _ensureBidirectional(step: step)
+    for _ in 0 ..< abs(numericCast(n)) {
+      _advanceIndex(&i, step: step)
+    }
+    return i
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func formIndex(_ i: inout Index, offsetBy n: Int) {
+    i = index(i, offsetBy: n)
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func index(
+    _ i: Index, offsetBy n: Int, limitedBy limit: Index
+  ) -> Index? {
+    var i = i
+    let step = n.signum()
+    // The following line makes sure that index(_:offsetBy:limitedBy:) is
+    // invoked on the _base at least once, to trigger a _precondition in
+    // forward only collections.
+    _ensureBidirectional(step: step)
+    for _ in 0 ..< abs(numericCast(n)) {
+      if i == limit {
+        return nil
+      }
+      _advanceIndex(&i, step: step)
+    }
+    return i
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func formIndex(
+    _ i: inout Index, offsetBy n: Int, limitedBy limit: Index
+  ) -> Bool {
+    if let advancedIndex = index(i, offsetBy: n, limitedBy: limit) {
+      i = advancedIndex
+      return true
+    }
+    i = limit
+    return false
+  }
+
+  /// Accesses the element at `position`.
   ///
-  /// - Requires: `position` is a valid position in `self` and
+  /// - Precondition: `position` is a valid position in `self` and
   /// `position != endIndex`.
-  public subscript(position: Index) -> Base.Generator.Element {
-    return _base[position.base]
+  @_inlineable // FIXME(sil-serialize-all)
+  public subscript(position: Index) -> Element {
+    return _base[position]
   }
 
-  /// Return a *generator* over the elements of this *sequence*.
-  ///
-  /// - Complexity: O(1).
-  public func generate() -> LazyFilterGenerator<Base.Generator> {
-    return LazyFilterGenerator(
-      _base.generate(), whereElementsSatisfy: _predicate)
+  @_inlineable // FIXME(sil-serialize-all)
+  public subscript(bounds: Range<Index>) -> SubSequence {
+    return SubSequence(_base: _base[bounds], _predicate)
   }
-
-  var _base: Base
-  var _predicate: (Base.Generator.Element) -> Bool
 }
 
-extension LazySequenceType {
-  /// Return the elements of `self` that satisfy `predicate`.
+extension LazyFilterCollection : BidirectionalCollection
+  where Base : BidirectionalCollection {
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func index(before i: Index) -> Index {
+    var i = i
+    formIndex(before: &i)
+    return i
+  }
+
+  @_inlineable // FIXME(sil-serialize-all)
+  public func formIndex(before i: inout Index) {
+    // TODO: swift-3-indexing-model: _failEarlyRangeCheck i?
+    var index = i
+    _precondition(index != _base.startIndex, "Can't retreat before startIndex")
+    repeat {
+      _base.formIndex(before: &index)
+    } while !_predicate(_base[index])
+    i = index
+  }
+}
+
+extension LazySequenceProtocol {
+  /// Returns the elements of `self` that satisfy `isIncluded`.
   ///
   /// - Note: The elements of the result are computed on-demand, as
   ///   the result is used. No buffering storage is allocated and each
   ///   traversal step invokes `predicate` on one or more underlying
   ///   elements.
-  @warn_unused_result
+  @_inlineable // FIXME(sil-serialize-all)
   public func filter(
-    predicate: (Elements.Generator.Element) -> Bool
+    _ isIncluded: @escaping (Elements.Element) -> Bool
   ) -> LazyFilterSequence<Self.Elements> {
-    return LazyFilterSequence(
-      self.elements, whereElementsSatisfy: predicate)
+    return LazyFilterSequence(_base: self.elements, isIncluded)
   }
 }
 
-extension LazyCollectionType {
-  /// Return the elements of `self` that satisfy `predicate`.
+extension LazyCollectionProtocol {
+  /// Returns the elements of `self` that satisfy `predicate`.
   ///
   /// - Note: The elements of the result are computed on-demand, as
   ///   the result is used. No buffering storage is allocated and each
   ///   traversal step invokes `predicate` on one or more underlying
   ///   elements.
-  @warn_unused_result
+  @_inlineable // FIXME(sil-serialize-all)
   public func filter(
-    predicate: (Elements.Generator.Element) -> Bool
+    _ isIncluded: @escaping (Elements.Element) -> Bool
   ) -> LazyFilterCollection<Self.Elements> {
-    return LazyFilterCollection(
-      self.elements, whereElementsSatisfy: predicate)
+    return LazyFilterCollection(_base: self.elements, isIncluded)
   }
 }
 
-/// Return an `Array` containing the elements of `source`,
-/// in order, that satisfy the predicate `includeElement`.
-@available(*, unavailable, message="call the 'filter()' method on the sequence")
-public func filter<S : SequenceType>(
-  source: S, _ includeElement: (S.Generator.Element) -> Bool
-) -> [S.Generator.Element] {
-  fatalError("unavailable function can't be called")
-}
+// @available(*, deprecated, renamed: "LazyFilterSequence.Iterator")
+public typealias LazyFilterIterator<T: Sequence> = LazyFilterSequence<T>.Iterator
+// @available(swift, deprecated: 3.1, obsoleted: 4.0, message: "Use Base.Index")
+public typealias LazyFilterIndex<Base: Collection> = Base.Index
+@available(*, deprecated, renamed: "LazyFilterCollection")
+public typealias LazyFilterBidirectionalCollection<T> = LazyFilterCollection<T> where T : BidirectionalCollection
 
-@available(*, unavailable, renamed="FilterSequence")
-public struct FilterSequenceView<Base : SequenceType> {}
-
-@available(*, unavailable, renamed="FilterCollectionIndex")
-public struct FilterCollectionViewIndex<Base: CollectionType> {}
-
-@available(*, unavailable, renamed="FilterCollection")
-public struct FilterCollectionView<Base : CollectionType> {}
-
-// ${'Local Variables'}:
-// eval: (read-only-mode 1)
-// End:

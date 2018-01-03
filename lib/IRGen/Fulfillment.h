@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,6 +25,7 @@
 
 namespace swift {
 namespace irgen {
+  class IRGenModule;
   enum IsExact_t : bool;
 
 /// The metadata value can be fulfilled by following the given metadata
@@ -65,17 +66,10 @@ public:
     virtual GenericSignature::ConformsToArray
       getInterestingConformances(CanType type) const = 0;
 
-    virtual ~InterestingKeysCallback() = default;
-  };
+    /// Return the limited interesting conformances for an interesting type.
+    virtual CanType getSuperclassBound(CanType type) const = 0;
 
-  /// An implementation of InterestingKeysCallback that returns everything
-  /// fulfillable.
-  struct Everything : InterestingKeysCallback {
-    bool isInterestingType(CanType type) const override;
-    bool hasInterestingType(CanType type) const override;
-    bool hasLimitedInterestingConformances(CanType type) const override;
-    GenericSignature::ConformsToArray
-      getInterestingConformances(CanType type) const override;
+    virtual ~InterestingKeysCallback() = default;
   };
 
   FulfillmentMap() = default;
@@ -95,14 +89,19 @@ public:
   /// Search the given type metadata for useful fulfillments.
   ///
   /// \return true if any fulfillments were added by this search.
-  bool searchTypeMetadata(ModuleDecl &M, CanType type, IsExact_t isExact,
+  bool searchTypeMetadata(IRGenModule &IGM, CanType type, IsExact_t isExact,
                           unsigned sourceIndex, MetadataPath &&path,
                           const InterestingKeysCallback &interestingKeys);
+
+  bool searchConformance(IRGenModule &IGM,
+                         const ProtocolConformance *conformance,
+                         unsigned sourceIndex, MetadataPath &&path,
+                         const InterestingKeysCallback &interestingKeys);
 
   /// Search the given witness table for useful fulfillments.
   ///
   /// \return true if any fulfillments were added by this search.
-  bool searchWitnessTable(ModuleDecl &M, CanType type, ProtocolDecl *protocol,
+  bool searchWitnessTable(IRGenModule &IGM, CanType type, ProtocolDecl *protocol,
                           unsigned sourceIndex, MetadataPath &&path,
                           const InterestingKeysCallback &interestingKeys);
 
@@ -130,39 +129,29 @@ public:
     }
   }
 
+  void dump() const;
+  void print(llvm::raw_ostream &out) const;
+  friend llvm::raw_ostream &operator<<(llvm::raw_ostream &out,
+                                       const FulfillmentMap &map) {
+    map.print(out);
+    return out;
+  }
+
 private:
-  bool searchParentTypeMetadata(ModuleDecl &M, CanType parent,
-                                unsigned source, MetadataPath &&path,
-                                const InterestingKeysCallback &keys);
-
-  bool searchNominalTypeMetadata(ModuleDecl &M, CanNominalType type,
+  bool searchNominalTypeMetadata(IRGenModule &IGM, CanType type,
                                  unsigned source, MetadataPath &&path,
-                                 const InterestingKeysCallback &keys);
-
-  bool searchBoundGenericTypeMetadata(ModuleDecl &M, CanBoundGenericType type,
-                                      unsigned source, MetadataPath &&path,
-                                      const InterestingKeysCallback &keys);
-
-  bool searchTypeArgConformances(ModuleDecl &M, CanType arg,
-                                 ArchetypeType *param,
-                                 unsigned source, const MetadataPath &path,
-                                 unsigned argIndex,
                                  const InterestingKeysCallback &keys);
 
   /// Search the given witness table for useful fulfillments.
   ///
   /// \return true if any fulfillments were added by this search.
-  bool searchWitnessTable(ModuleDecl &M, CanType type, ProtocolDecl *protocol,
-                          unsigned sourceIndex, MetadataPath &&path,
-                          const InterestingKeysCallback &interestingKeys,
-                          const llvm::SmallPtrSetImpl<ProtocolDecl*> *
-                            interestingConformances);
-
+  bool searchWitnessTable(
+      IRGenModule &IGM, CanType type, ProtocolDecl *protocol, unsigned source,
+      MetadataPath &&path, const InterestingKeysCallback &keys,
+      llvm::SmallPtrSetImpl<ProtocolDecl *> *interestingConformances);
 };
 
 }
 }
 
 #endif
-
-

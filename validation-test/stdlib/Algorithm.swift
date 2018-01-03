@@ -6,12 +6,6 @@ import StdlibUnittest
 import StdlibCollectionUnittest
 import SwiftPrivate
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
 var Algorithm = TestSuite("Algorithm")
 
@@ -81,21 +75,24 @@ Algorithm.test("min,max") {
 }
 
 Algorithm.test("sorted/strings")
-  .xfail(.LinuxAny(reason: "String comparison: ICU vs. Foundation"))
+  .xfail(.nativeRuntime("String comparison: ICU vs. Foundation " +
+    "https://bugs.swift.org/browse/SR-530"))
   .code {
   expectEqual(
-    [ "Banana", "apple", "cherry" ],
-    [ "apple", "Banana", "cherry" ].sort())
+    ["Banana", "apple", "cherry"],
+    ["apple", "Banana", "cherry"].sorted())
 
-  let s = ["apple", "Banana", "cherry"].sort() {
+  let s = ["apple", "Banana", "cherry"].sorted() {
     $0.characters.count > $1.characters.count
   }
-  expectEqual([ "Banana", "cherry", "apple" ], s)
+  expectEqual(["Banana", "cherry", "apple"], s)
 }
 
 // A wrapper around Array<T> that disables any type-specific algorithm
 // optimizations and forces bounds checking on.
-struct A<T> : MutableSliceable {
+struct A<T> : MutableCollection, RandomAccessCollection {
+  typealias Indices = CountableRange<Int>
+
   init(_ a: Array<T>) {
     impl = a
   }
@@ -108,8 +105,8 @@ struct A<T> : MutableSliceable {
     return impl.count
   }
 
-  func generate() -> Array<T>.Generator {
-    return impl.generate()
+  func makeIterator() -> Array<T>.Iterator {
+    return impl.makeIterator()
   }
 
   subscript(i: Int) -> T {
@@ -125,13 +122,13 @@ struct A<T> : MutableSliceable {
 
   subscript(r: Range<Int>) -> Array<T>.SubSequence {
     get {
-      expectTrue(r.startIndex >= 0 && r.startIndex <= impl.count)
-      expectTrue(r.endIndex >= 0 && r.endIndex <= impl.count)
+      expectTrue(r.lowerBound >= 0 && r.lowerBound <= impl.count)
+      expectTrue(r.upperBound >= 0 && r.upperBound <= impl.count)
       return impl[r]
     }
     set (x) {
-      expectTrue(r.startIndex >= 0 && r.startIndex <= impl.count)
-      expectTrue(r.endIndex >= 0 && r.endIndex <= impl.count)
+      expectTrue(r.lowerBound >= 0 && r.lowerBound <= impl.count)
+      expectTrue(r.upperBound >= 0 && r.upperBound <= impl.count)
       impl[r] = x
     }
   }
@@ -147,12 +144,14 @@ func randomArray() -> A<Int> {
 Algorithm.test("invalidOrderings") {
   withInvalidOrderings {
     var a = randomArray()
-    _blackHole(a.sort($0))
+    _blackHole(a.sorted(by: $0))
   }
   withInvalidOrderings {
     var a: A<Int>
     a = randomArray()
-    a.partition(a.indices, isOrderedBefore: $0)
+    let lt = $0
+    let first = a.first
+    _ = a.partition(by: { !lt($0, first!) })
   }
   /*
   // FIXME: Disabled due to <rdar://problem/17734737> Unimplemented:
@@ -166,10 +165,10 @@ Algorithm.test("invalidOrderings") {
 }
 
 // The routine is based on http://www.cs.dartmouth.edu/~doug/mdmspe.pdf
-func makeQSortKiller(len: Int) -> [Int] {
+func makeQSortKiller(_ len: Int) -> [Int] {
   var candidate: Int = 0
-  var keys = [Int:Int]()
-  func Compare(x: Int, y : Int) -> Bool {
+  var keys = [Int: Int]()
+  func Compare(_ x: Int, y : Int) -> Bool {
     if keys[x] == nil && keys[y] == nil {
       if (x == candidate) {
         keys[x] = keys.count
@@ -188,10 +187,10 @@ func makeQSortKiller(len: Int) -> [Int] {
     return keys[x]! > keys[y]!
   }
 
-  var ary = [Int](count: len, repeatedValue:0)
-  var ret = [Int](count: len, repeatedValue:0)
+  var ary = [Int](repeating: 0, count: len)
+  var ret = [Int](repeating: 0, count: len)
   for i in 0..<len { ary[i] = i }
-  ary = ary.sort(Compare)
+  ary = ary.sorted(by: Compare)
   for i in 0..<len {
     ret[ary[i]] = i
   }
@@ -201,28 +200,59 @@ func makeQSortKiller(len: Int) -> [Int] {
 Algorithm.test("sorted/complexity") {
   var ary: [Int] = []
 
-  // Check performance of sort on array of repeating values
+  // Check performance of sorting an array of repeating values.
   var comparisons_100 = 0
-  ary = [Int](count: 100, repeatedValue: 0)
-  ary.sortInPlace { comparisons_100++; return $0 < $1 }
+  ary = [Int](repeating: 0, count: 100)
+  ary.sort { comparisons_100 += 1; return $0 < $1 }
   var comparisons_1000 = 0
-  ary = [Int](count: 1000, repeatedValue: 0)
-  ary.sortInPlace { comparisons_1000++; return $0 < $1 }
+  ary = [Int](repeating: 0, count: 1000)
+  ary.sort { comparisons_1000 += 1; return $0 < $1 }
   expectTrue(comparisons_1000/comparisons_100 < 20)
 
   // Try to construct 'bad' case for quicksort, on which the algorithm
   // goes quadratic.
   comparisons_100 = 0
   ary = makeQSortKiller(100)
-  ary.sortInPlace { comparisons_100++; return $0 < $1 }
+  ary.sort { comparisons_100 += 1; return $0 < $1 }
   comparisons_1000 = 0
   ary = makeQSortKiller(1000)
-  ary.sortInPlace { comparisons_1000++; return $0 < $1 }
+  ary.sort { comparisons_1000 += 1; return $0 < $1 }
   expectTrue(comparisons_1000/comparisons_100 < 20)
 }
 
 Algorithm.test("sorted/return type") {
-  let x: Array = ([5, 4, 3, 2, 1] as ArraySlice).sort()
+  let x: Array = ([5, 4, 3, 2, 1] as ArraySlice).sorted()
+}
+
+Algorithm.test("sort3/simple")
+  .forEach(in: [
+    [1, 2, 3], [1, 3, 2], [2, 1, 3], [2, 3, 1], [3, 1, 2], [3, 2, 1]
+  ]) {
+    var input = $0
+    _sort3(&input, 0, 1, 2)
+    expectEqual([1, 2, 3], input)
+}
+
+func isSorted<T>(_ a: [T], by areInIncreasingOrder: (T, T) -> Bool) -> Bool {
+  return !a.dropFirst().enumerated().contains(where: { (offset, element) in
+    areInIncreasingOrder(element, a[offset])
+  })
+}
+
+Algorithm.test("sort3/stable")
+  .forEach(in: [
+    [1, 1, 2], [1, 2, 1], [2, 1, 1], [1, 2, 2], [2, 1, 2], [2, 2, 1], [1, 1, 1]
+  ]) {
+    // decorate with offset, but sort by value
+    var input = Array($0.enumerated())
+    _sort3(&input, 0, 1, 2) { $0.element < $1.element }
+    // offsets should still be ordered for equal values
+    expectTrue(isSorted(input) {
+      if $0.element == $1.element {
+        return $0.offset < $1.offset
+      }
+      return $0.element < $1.element
+    })
 }
 
 runAllTests()

@@ -2,11 +2,11 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2016 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
-// See http://swift.org/LICENSE.txt for license information
-// See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,7 +24,7 @@
 ///   This type is always canonical.  The default behavior is TYPE(id, parent).
 
 /// BUILTIN_TYPE(id, parent)
-///   This type is a builtin type. The default behavior is 
+///   This type is a builtin type. The default behavior is
 ///   ALWAYS_CANONICAL_TYPE(id, parent).
 
 /// SUGARED_TYPE(id, parent)
@@ -83,7 +83,11 @@
 #define TYPE_RANGE(Id, First, Last)
 #endif
 
-UNCHECKED_TYPE(Error, Type)
+#ifndef LAST_TYPE
+#define LAST_TYPE(Id)
+#endif
+
+TYPE(Error, Type)
 UNCHECKED_TYPE(Unresolved, Type)
 ABSTRACT_TYPE(Builtin, Type)
   BUILTIN_TYPE(BuiltinInteger, BuiltinType)
@@ -103,12 +107,22 @@ ABSTRACT_TYPE(ReferenceStorage, Type)
   ARTIFICIAL_TYPE(UnmanagedStorage, ReferenceStorageType)
   ARTIFICIAL_TYPE(WeakStorage, ReferenceStorageType)
   TYPE_RANGE(ReferenceStorage, UnownedStorage, WeakStorage)
-ABSTRACT_TYPE(Nominal, Type)
-  TYPE(Enum, NominalType)
-  TYPE(Struct, NominalType)
-  TYPE(Class, NominalType)
-  ALWAYS_CANONICAL_TYPE(Protocol, NominalType)
-  TYPE_RANGE(Nominal, Enum, Protocol)
+ABSTRACT_TYPE(AnyGeneric, Type)
+  ABSTRACT_TYPE(NominalOrBoundGenericNominal, Type)
+    ABSTRACT_TYPE(Nominal, Type)
+      TYPE(Enum, NominalType)
+      TYPE(Struct, NominalType)
+      TYPE(Class, NominalType)
+      TYPE(Protocol, NominalType)
+      TYPE_RANGE(Nominal, Enum, Protocol)
+    ABSTRACT_TYPE(BoundGeneric, Type)
+      TYPE(BoundGenericClass, BoundGenericType)
+      TYPE(BoundGenericEnum, BoundGenericType)
+      TYPE(BoundGenericStruct, BoundGenericType)
+      TYPE_RANGE(BoundGeneric, BoundGenericClass, BoundGenericStruct)
+    TYPE_RANGE(NominalOrBoundGenericNominal, Enum, BoundGenericStruct)
+  UNCHECKED_TYPE(UnboundGeneric, Type)
+  TYPE_RANGE(AnyGeneric, Enum, UnboundGeneric)
 ABSTRACT_TYPE(AnyMetatype, Type)
   TYPE(Metatype, AnyMetatypeType)
   TYPE(ExistentialMetatype, AnyMetatypeType)
@@ -116,37 +130,30 @@ ALWAYS_CANONICAL_TYPE(Module, Type)
 TYPE(DynamicSelf, Type)
 ABSTRACT_TYPE(Substitutable, Type)
   ALWAYS_CANONICAL_TYPE(Archetype, SubstitutableType)
-  ABSTRACT_TYPE(AbstractTypeParam, SubstitutableType)
-    TYPE(GenericTypeParam, AbstractTypeParamType)
-    SUGARED_TYPE(AssociatedType, AbstractTypeParamType)
-    TYPE_RANGE(AbstractTypeParam, GenericTypeParam, AssociatedType)
-  TYPE_RANGE(Substitutable, Archetype, AssociatedType)
-SUGARED_TYPE(Substituted, Type)
+  TYPE(GenericTypeParam, SubstitutableType)
+  TYPE_RANGE(Substitutable, Archetype, GenericTypeParam)
 TYPE(DependentMember, Type)
 ABSTRACT_TYPE(AnyFunction, Type)
   TYPE(Function, AnyFunctionType)
-  TYPE(PolymorphicFunction, AnyFunctionType)
   TYPE(GenericFunction, AnyFunctionType)
   TYPE_RANGE(AnyFunction, Function, GenericFunction)
 ARTIFICIAL_TYPE(SILFunction, Type)
 ARTIFICIAL_TYPE(SILBlockStorage, Type)
 ARTIFICIAL_TYPE(SILBox, Type)
+ARTIFICIAL_TYPE(SILToken, Type)
 ABSTRACT_SUGARED_TYPE(SyntaxSugar, Type)
-  SUGARED_TYPE(ArraySlice, SyntaxSugarType)
-  SUGARED_TYPE(Optional, SyntaxSugarType)
-  SUGARED_TYPE(ImplicitlyUnwrappedOptional, SyntaxSugarType)
-  TYPE_RANGE(SyntaxSugar, ArraySlice, ImplicitlyUnwrappedOptional)
-SUGARED_TYPE(Dictionary, Type)
+  ABSTRACT_SUGARED_TYPE(UnarySyntaxSugar, SyntaxSugarType)
+    SUGARED_TYPE(ArraySlice, UnarySyntaxSugarType)
+    SUGARED_TYPE(Optional, UnarySyntaxSugarType)
+    SUGARED_TYPE(ImplicitlyUnwrappedOptional, UnarySyntaxSugarType)
+    TYPE_RANGE(UnarySyntaxSugar, ArraySlice, ImplicitlyUnwrappedOptional)
+  SUGARED_TYPE(Dictionary, SyntaxSugarType)
+  TYPE_RANGE(SyntaxSugar, ArraySlice, Dictionary)
 TYPE(ProtocolComposition, Type)
 TYPE(LValue, Type)
 TYPE(InOut, Type)
-UNCHECKED_TYPE(UnboundGeneric, Type)
-ABSTRACT_TYPE(BoundGeneric, Type)
-  TYPE(BoundGenericClass, BoundGenericType)
-  TYPE(BoundGenericEnum, BoundGenericType)
-  TYPE(BoundGenericStruct, BoundGenericType)
-  TYPE_RANGE(BoundGeneric, BoundGenericClass, BoundGenericStruct)
 UNCHECKED_TYPE(TypeVariable, Type)
+LAST_TYPE(TypeVariable)
 
 #undef TYPE_RANGE
 #undef ABSTRACT_SUGARED_TYPE
@@ -157,3 +164,4 @@ UNCHECKED_TYPE(TypeVariable, Type)
 #undef BUILTIN_TYPE
 #undef ALWAYS_CANONICAL_TYPE
 #undef TYPE
+#undef LAST_TYPE
